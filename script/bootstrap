@@ -6,8 +6,6 @@
 # can be accessed using a convenience url:
 # curl -L http://links.ethanschoonover.com/atypical
 
-print "testing $0 and $1"
-
 cat > /tmp/bootstrap << 'EOF'
 pacman --noconfirm -Sy git;
 cd;
@@ -15,8 +13,10 @@ git clone https://github.com/altercation/atypical.git atypical;
 ln -s $(pwd)/atypical/atypical /usr/local/bin/atypical;
 print -b "\natypical arch install script ready to run:";
 print -b "enter the desired manifest name after the command";
-print -b "\n    atypical manifest-name here"
-print -b "see the atypical/manifest directory for manifest names"
+print -b "\n    # atypical manifest-filename\n"
+print -b "(see the atypical/manifest directory for manifest names)"
 EOF
 
-print "f6ce8fac3364d3a554f9381695c5268f  /tmp/bootstrap" | md5sum -c --quiet && zsh /tmp/bootstrap
+# make sure that curl/wget didn't fail during transfer by having written out the file first
+# and we then can be doubly certain by running a hash on it
+print "c37a97629bda0dd950ec34d71af1779a  /tmp/bootstrap" | md5sum -c --quiet && zsh /tmp/bootstrap
