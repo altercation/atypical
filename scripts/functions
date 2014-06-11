@@ -20,7 +20,7 @@ AUR_INSTALL () {
 	}
 
 INSTALL () {
-    if ! which pacaur;
+    if ! which pacaur; then
         sudo pacman -Sy
         AUR_INSTALL cower
         AUR_INSTALL pacaur
