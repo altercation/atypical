@@ -1,0 +1,14 @@
+#/usr/bin/env zsh
+
+# a convenience helper script to bootstrap the installation
+# of git and the cloning of the atypical repo.
+#
+# can be accessed using a convenience url:
+# curl -L http://links.ethanschoonover.com/atypical
+
+pacman -Sy git
+git clone https://github.com/altercation/atypical.git atypical
+cd atypical
+print -b "\natypical arch install script ready to run:"
+print -b "enter the desired manifest name after the command"
+print -z "zsh atypical "

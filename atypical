@@ -151,7 +151,6 @@ done
 
 INSTALL[DRIVE]=$drives[$SELECTED]
 
-
 :<< \
 -----------------------------------------------------------------------
 PARSE STORAGE TABLE
