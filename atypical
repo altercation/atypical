@@ -27,7 +27,7 @@ With no arguments, atypical uses defaults as listed below in the defaults sectio
 FRONTMATTER
 -----------------------------------------------------------------------
 INSTALL[MOUNT_ROOT]=/mnt
-SCRIPT=$(readlink -f "$0"); SCRIPTPATH=$(dirname "$SCRIPT")
+SCRIPT=$(readlink -f "$0"); SCRIPT_PATH=$(dirname "$SCRIPT")
 #fpath=(${SCRIPT_PATH}/functions $fpath)
 source ${SCRIPT_PATH}/script/functions
 
