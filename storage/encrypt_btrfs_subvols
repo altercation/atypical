@@ -1,6 +1,5 @@
-DESCRIPTION="Single device, encrypted, root is btrfs, no swap, includes unencrypted boot, no initial btrfs subvolumes"
+# Single device, encrypted, root is btrfs, no swap, includes unencrypted boot, no initial btrfs subvolumes
 
-BLOCKTABLE=("${(@f)$(cat <<\
 ==========================================================================
 SIZE   CODE   LABEL       CHILD_OF    FSTYPE   MOUNT_POINT   MOUNT_OPTIONS
 --------------------------------------------------------------------------
@@ -12,4 +11,3 @@ max    8300   cryptsys    -           luks     -             -
 -      -      root        system      btrfs    /             -
 -      -      home        system      btrfs    /home         -
 ==========================================================================
-)}")

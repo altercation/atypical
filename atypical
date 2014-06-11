@@ -27,13 +27,20 @@ With no arguments, atypical uses defaults as listed below in the defaults sectio
 FRONTMATTER
 -----------------------------------------------------------------------
 setopt ERR_EXIT NO_UNSET EXTENDED_GLOB #VERBOSE XTRACE
-typeset -Ag CONFIG PACKAGES SERVICES STATE \
+typeset -Ag CONFIG INSTALLER \
             MKFS_OPTIONS MOUNT_OPTIONS LUKS_OPTIONS
 typeset -ag MODULES MANIFEST BOOTOPTS STORAGE
 MOUNT_ROOT=/mnt
 SCRIPT=$(readlink -f "$0"); SCRIPT_PATH=$(dirname "$SCRIPT")
 fpath=(${SCRIPT_PATH}/installers $fpath)
 source ${SCRIPT_PATH}/scripts/functions
+MANIFEST_PATH="${SCRIPT_PATH}/manifests/$1"
+if [ -e "${MANIFEST_PATH}" ]; then
+    source "${MANIFEST_PATH}"
+else
+    echo "No manifest found at ${MANIFEST_PATH}; exiting"
+    exit
+fi
 
 :<< \
 -----------------------------------------------------------------------
@@ -83,7 +90,6 @@ fi
 '-----------------------------------------------------------------------'
 DISK SELECTION
 -----------------------------------------------------------------------
-
 # Create list of drives
 # Remove mounted drives from list
 drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
@@ -124,8 +130,9 @@ DRIVE=$drives[$SELECTED]
 
 :<< \
 -----------------------------------------------------------------------
-PARSE STORAGE TABLE
+READ & PARSE STORAGE TABLE
 -----------------------------------------------------------------------
+STORAGE=("${(@f)$(egrep -v "^#|^$" ${SCRIPT_PATH}/storage/${CONFIG[STORAGE]})}")
 
 echo "\n\nInstallation to $DRIVE beginning...\n\n"
 

@@ -4,14 +4,14 @@
 CONFIG[HOSTNAME]=lithograph
 CONFIG[TIMEZONE]="America/Los_Angeles"
 CONFIG[LOCALE,GEN]="en_US.UTF-8 UTF-8"
-CONFIG[LOCALE,CONF]=en_US.UTF-8"
+CONFIG[LOCALE,CONF]="en_US.UTF-8"
 CONFIG[CONSOLEFONT]="Lat2-Terminus16"
 CONFIG[USER,NAME]="es"
 CONFIG[USER,SHELL]="zsh"
+CONFIG[STORAGE]="btrfs_simple"
 
 # to be run as root
 INSTALLER[VIDEO]="video_intel"
-INSTALLER[STORAGE]="storage_1_clear_btrfs_simple"
 INSTALLER[CLI]="cli_zsh cli_mutt cli_vim"
 INSTALLER[GUI]="gui_xmonad_xmobar"
 INSTALLER[UTILS]="utils_admin utils_file utils_mlocate utils_cron utils_disk utils_power"
