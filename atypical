@@ -39,7 +39,7 @@ source ${SCRIPT_PATH}/scripts/functions
 -----------------------------------------------------------------------
 DETECT SYSTEM MEMORY - for use in partition/filesystem table
 -----------------------------------------------------------------------
-RAM="$(( $(print ${$(cat /proc/meminfo | grep -i memtotal)[2]}) / 1000000 ))G"
+RAM=$(detectMemory)
 
 :<< \
 -----------------------------------------------------------------------
@@ -87,9 +87,12 @@ DISK SELECTION
 # Create list of drives
 # Remove mounted drives from list
 drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+print "FULL LIST OF DRIVES:"
 print -l "$drives"
+print
 for drive in $drives; do deviceOrChildHasMountpoint $drive && removeFromArray drives $drive || :; done
 print "----------"
+print "LIST OF DRIVES WITH NO MOUNT:"
 print -l "$drives"
 
 # User selects drive for install
