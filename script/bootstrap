@@ -6,7 +6,7 @@
 # can be accessed using a convenience url:
 # curl -L http://links.ethanschoonover.com/atypical
 
-print "testing $0"
+print "testing $0 and $1"
 
 cat > /tmp/bootstrap << 'EOF'
 pacman --noconfirm -Sy git;
