@@ -27,34 +27,12 @@ With no arguments, atypical uses defaults as listed below in the defaults sectio
 FRONTMATTER
 -----------------------------------------------------------------------
 setopt ERR_EXIT NO_UNSET EXTENDED_GLOB #VERBOSE XTRACE
-typeset -Ag CONFIG PACKAGES SERVICES
+typeset -Ag CONFIG PACKAGES SERVICES STATE
 typeset -ag MODULES MANIFEST BOOTOPTS STORAGE
 MOUNT_ROOT=/mnt
 SCRIPT=$(readlink -f "$0"); SCRIPT_PATH=$(dirname "$SCRIPT")
 fpath=(${SCRIPT_PATH}/installers $fpath)
 source ${SCRIPT_PATH}/scripts/functions
-
-:<< \
-'-----------------------------------------------------------------------'
-INSTALL COMMANDS - using pacaur as AUR helper and pacman proxy command
------------------------------------------------------------------------
-AUR_INSTALL () {
-	PKG=$1; CURDIR="$(pwd)"
-	TMPDIR=/tmp; [ -d $TMPDIR ] || mkdir $TMPDIR; cd $TMPDIR
-        [ -z ${UPDATED:-} ] && pacman --noconfirm -Sy && typeset -g UPDATED=true
-	rm -rf ${PKG}* || true
-	curl -O https://aur.archlinux.org/packages/${PKG:0:2}/${PKG}/${PKG}.tar.gz
-	tar -xzvf ${PKG}.tar.gz
-	cd ${PKG}
-	makepkg --noconfirm --syncdeps --clean --needed --install
-	cd $TMPDIR
-	rm -rf ${PKG}* || true
-	cd "$CURDIR"
-	}
-sudo pacman -Sy
-AUR_INSTALL cower
-AUR_INSTALL pacaur
-INSTALL () { [ -n $@ ] && pacaur --noconfirm --noedit -S $@; }
 
 :<< \
 -----------------------------------------------------------------------

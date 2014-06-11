@@ -3,6 +3,31 @@
 HELPER FUNCTIONS
 -----------------------------------------------------------------------
 
+# pacman/aur
+
+AUR_INSTALL () {
+	PKG=$1; CURDIR="$(pwd)"
+	TMPDIR=/tmp; [ -d $TMPDIR ] || mkdir $TMPDIR; cd $TMPDIR
+        [ -z ${UPDATED:-} ] && pacman --noconfirm -Sy && typeset -g UPDATED=true
+	rm -rf ${PKG}* || true
+	curl -O https://aur.archlinux.org/packages/${PKG:0:2}/${PKG}/${PKG}.tar.gz
+	tar -xzvf ${PKG}.tar.gz
+	cd ${PKG}
+	makepkg --noconfirm --syncdeps --clean --needed --install
+	cd $TMPDIR
+	rm -rf ${PKG}* || true
+	cd "$CURDIR"
+	}
+
+INSTALL () {
+    if ! which pacaur;
+        sudo pacman -Sy
+        AUR_INSTALL cower
+        AUR_INSTALL pacaur
+    fi
+    [ -n $@ ] && pacaur --noconfirm --noedit -S $@;
+}
+
 # General
 
 conformToArray () {
@@ -112,5 +137,3 @@ checkForLuksAncestor () {
         return 1
     fi
 }
-
-

@@ -1,5 +1,6 @@
 # For Thinkpad x220, a basic xmonad installation
 
+# general system config
 CONFIG[HOSTNAME]=lithograph
 CONFIG[TIMEZONE]="America/Los_Angeles"
 CONFIG[LOCALE,GEN]="en_US.UTF-8 UTF-8"
@@ -8,6 +9,7 @@ CONFIG[CONSOLEFONT]="Lat2-Terminus16"
 CONFIG[USER,NAME]="es"
 CONFIG[USER,SHELL]="zsh"
 
+# to be run as root
 INSTALLER[VIDEO]="video_intel"
 INSTALLER[STORAGE]="storage_1_clear_btrfs_simple"
 INSTALLER[CLI]="cli_zsh cli_mutt cli_vim"
@@ -15,181 +17,6 @@ INSTALLER[GUI]="gui_xmonad_xmobar"
 INSTALLER[UTILS]="utils_admin utils_file utils_mlocate utils_cron utils_disk utils_power"
 INSTALLER[APPS]="apps_vm"
 
-INSTALLER[USER]=""
-
-# ------------------------------------------------------------------------------
-: <<'IGNORE'
-
-
-
-# snapper setup
-snapper -c root create-config /
-snapper -c var create-config /var # for exclusion other than subvolumes of var
-snapper -c paclib create-config /var/lib/pacman # for inclusion
-snapper -c paccache create-config /var/cache/pacman # for inclusion
-snapper -c home create-config /home
-
-# take initial snapshots
-SNAPDESC="initial install-time snapshot"
-snapper -c root create -d $SNAPDESC
-snapper -c var create -d $SNAPDESC
-snapper -c paclib create -d $SNAPDESC
-snapper -c paccache create -d $SNAPDESC
-snapper -c home create -d $SNAPDESC
-
-
-# snapper setup
-# snapper -c root create-config /
-# snapper -c var create-config /var
-# snapper -c pacman create-config /var/lib/pacman
-# snapper -c home create-config /home
-
-# take snapshot
-# snapper create
-
-snapper create -d "
-
-updatedb
-By default, updatedb will also index the .snapshots directory created by snapper, which can cause serious slowdown and excessive memory usage if you have many snapshots. You can prevent updatedb from indexing over it by editing:
-/etc/updatedb.conf
-PRUNENAMES = ".snapshots"
-
-
-
-
-# remap shift-space to underscore
-# xmodmap -e 'keycode 65 = space underscore space'
-
-
-
-
-
-
-#powertop 
-sudo pacman --noconfirm -S powertop 
-sudo powertop --calibrate 
-sudo powertop --auto-tune 
-
-
-
-
-
-
-# powertop
-# tlp
-cpupower
-# add cpupower to monitor where we are at with all this
-pacman -S cpupower
-http://www.thinkwiki.org/wiki/Category:X220_Tablet
-From Thinkwiki:
-It is a known problem for the X220 Tablet (other models may apply), that there is a problem concerning the CPU throttling in LINUX.
-Syntoms vary for different kernels and distributions. Eg in ubuntu the CPU speed gets blocked at low rates and the computer becomes very slow until reboot, in Opensuse the entire desktop freezes (only mouse pointer working) and switching to console is not possible.
-Solution is to disable the power management in the BIOS (at least disable BIOS CPU speed throttling). This has no major affect on battery life since the OS is still able to throttle the CPU when neccessary.
-
-
-
-
-
-
-
-Tips and tricks
-
-PowerTOP suggests a few methods to reduce the power consumption further. However, in the console, PowerTOP does not display the parameters. To find out which ones are suggested, proceed as follows:
-If you have changed parameters (e.g. in PowerTOP), reboot so that the system has default state of the parameters.
-Use PowerTOP to produce a report on parameters: # powertop --html=powerreport.html
-The last tab of the report now shows the actual parameters suggested by the tool to apply to save power.
-Powertop 2.5 includes an --auto-tune feature which sets all tunable options to their GOOD setting. This can be combined with systemd to have the tunables set on boot.
-/etc/systemd/system/powertop.service
-[Unit]
-Description=Powertop tunings
-[Service]
-Type=oneshot
-RemainAfterExit=no
-ExecStart=/usr/bin/powertop --auto-tune
-#"powertop --auto-tune" still needs a terminal for some reason.
-#Possibly a bug?
-Environment="TERM=xterm"
-
-[Install]
-WantedBy=multi-user.target
-
-
-# TLP INSTALL ON x100e I note following optional dependencies
-acpi_call
-acpid
-ethtool
-iw
-lsb-release
-smartmontools
-tp_smapi
-
-
-
-
-
-# power management via tlp - https://wiki.archlinux.org/index.php/TLP
-pacman -S tp_smapi acpi_call #thinkpad only
-pacman -S tlp tlp-rdw
-systemctl enable tlp
-#NOT USING tlp-sleep RIGHT NOW- might have interferred with suspend/resume
-#systemctl enable tlp-sleep
-systemctl enable NetworkManager-dispatcher
-# The configuration file is located at /etc/default/tlp
-# cf http://linrunner.de/en/tlp/docs/tlp-configuration.html
-
-# set up https://wiki.archlinux.org/index.php/Tp_smapi
-# REALLY NEED TO CHECK THIS
-
-
-# add cpupower to monitor where we are at with all this
-pacman -S cpupower
-http://www.thinkwiki.org/wiki/Category:X220_Tablet
-From Thinkwiki:
-It is a known problem for the X220 Tablet (other models may apply), that there is a problem concerning the CPU throttling in LINUX.
-Syntoms vary for different kernels and distributions. Eg in ubuntu the CPU speed gets blocked at low rates and the computer becomes very slow until reboot, in Opensuse the entire desktop freezes (only mouse pointer working) and switching to console is not possible.
-Solution is to disable the power management in the BIOS (at least disable BIOS CPU speed throttling). This has no major affect on battery life since the OS is still able to throttle the CPU when neccessary.
-
-aura -A gnome-shell-cpufreq-git
-
-#cpupower is good for checking but current kernel defaults are fine and no changes needed to be made
-
-# thinkfan
-install thinkfan from aur
-enable the service
-
-NUVOLA PLAYER:
--------------------------------------------------------
-pacman -S gst-plugins-ugly libgee06 libunique flashplugin lib32-flashplugin
-aura -A scour nuvolaplayer
-
-
-Install the necessary Flash dependencies by running one of the following commands:
-
-pacman -S flashplugin; # For 32-bit systems
-pacman -S lib32-flashplugin; # For 64-bit systems
-Alternatively, you can just install dependencies of these packages, see flashplugin 32bit or flashplugin 64bit for a list of dependencies.
-
-You have to install also lib32-libpulse and lib32-alsa-plugins on 64-bit systems.
-
-pacman -S lib32-libpulse lib32-alsa-plugins; # For 64-bit systems
-Install nspluginwrapper:
-
-pacman -S nspluginwrapper
-Download script nuvolaplayer-flashplugin-installer
-
-Run the script to install wrapped Flash plugin.
-
-SKIP THIS? I did it manually:
-sudo bash ./nuvolaplayer-flashplugin-installer --install --force
-
-Manual method:
-
-sudo nspluginwrapper -v -n -i /usr/lib32/mozilla/plugins/libflashplayer.so
-sudo mkdir -p /opt/nuvolaplayer/flash/{orig,wrapped}
-sudo mv /usr/lib/mozilla/plugins/npwrapper.libflashplayer.so /opt/nuvolaplayer/flash/wrapped/
-sudo cp /usr/lib32/mozilla/plugins/libflashplayer.so /opt/nuvolaplayer/flash/orig/
-
-
-
-IGNORE
+# to be run as user
+INSTALLER[USER]="es-user-bootstrap"
 
