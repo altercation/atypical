@@ -62,9 +62,9 @@ DEFAULTS & MANIFEST/PATTERN LOAD
 -----------------------------------------------------------------------
 MANIFEST=(storage_1_clear_btrfs_simple xorg_full video_intel gui_gnome utils_file)
 # load manifest, if present
-[ -n $1 ] && MANIFEST=($(egrep -v "^\s*#" "${SCRIPT_PATH}/**/$1"))
+[ -n $1 ] && MANIFEST=($(egrep -v "^\s*#" "${SCRIPT_PATH}/manifests/$1"))
 # load patterns listed in either new or default manifest
-for filename in $MANIFEST; do source "${SCRIPT_PATH}/**/$filename"; done
+for filename in $MANIFEST; do source "${SCRIPT_PATH}/patterns/$filename"; done
 
 :<< \
 -----------------------------------------------------------------------
