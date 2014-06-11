@@ -1,0 +1,9 @@
+DESCRIPTION="Single device, unencrypted, pure btrfs, no partitions, no legacy boot, no subvolumes, no swap"
+
+BLOCKTABLE=("${(@f)$(cat <<\
+==========================================================================
+SIZE   CODE   LABEL       CHILD_OF    FSTYPE   MOUNT_POINT   MOUNT_OPTIONS
+--------------------------------------------------------------------------
+-      -      root        -           btrfs    /             -
+==========================================================================
+)}")

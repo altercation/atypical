@@ -1,0 +1,41 @@
+# Patterns Guidelines
+
+## Gui
+
+    NAME PREFIX: gui_
+    CONTAINS: PACKAGES[GUI] scalar, list of packages
+
+## Storage
+
+    NAME PREFIX: storage_
+    CONTAINS: STORAGE array, table of storage partitions/encryption/filesystems
+
+A visual representation of storage configuration in table format.
+
+The storage table should be created so that child storage items (those that are somehow contained within another storage item/device) should be listed below parent items. See sample below.
+
+Btrfs subvolumes can be listed as fstype "btrfs" and as long as their parent volume (or subvolume) is also listed as btrfs they will be identified as subvolumes.
+
+Arbitrary columns can be added to this table for use in the scripts below; just be sure that each colume entry has a - (dash) or value for each "cell" in the table. Values that have spaces (example: if you have a LABEL with a space in it) must be space escaped or quoted. For simplicity's sake, I recommend removing whitespac where possible, however.
+
+An example storage pattern file must be named storage_* and contain the following table format variable assigment. See actual sample storage_* files in the same directory as this README for more information.
+
+STORAGE=("${(@f)$(cat <<\
+==========================================================================
+SIZE   CODE   LABEL       CHILD_OF    FSTYPE   MOUNT_POINT   MOUNT_OPTIONS
+--------------------------------------------------------------------------
+512M   ef00   EFI         -           fat      /boot         -
+$RAM   8300   cryptswap   -           luks     -             -
+max    8300   cryptsys    -           luks     -             -
+-      -      swap        cryptswap   swap     -             -
+-      -      system      cryptsys    btrfs    -             -
+-      -      root        system      btrfs    /             -
+-      -      home        system      btrfs    /home         -
+==========================================================================
+)}")
+
+Note the use of $RAM which will be generated at install time based on the
+amount of system memory available and will be formatted "8G" for 8 gigabytes
+of system memory, for example.
+
+

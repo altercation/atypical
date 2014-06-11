@@ -1,0 +1,2 @@
+PACKAGES[GUI]="gnome gnome-extra networkmanager gnome-bluetooth gnome-tweak-tool gconf-editor gnome-common telepathy gnome-defaults-list"
+SERVICES[GUI]="gdm NetworkManager bluetooth"

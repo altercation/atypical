@@ -1,0 +1,108 @@
+:<< \
+-----------------------------------------------------------------------
+HELPER FUNCTIONS
+-----------------------------------------------------------------------
+
+# General
+
+conformToArray () {
+# takes a global variable NAME as an argument, ensures that it is an
+# array, not a simple list (doesn't damage existing arrays)
+eval "$1=($(print ${(P)1}))"
+}
+
+removeFromArray() { eval $1=\("\${(@)$1:#$2}"\); }
+
+addToCommaList () {
+    varname=$1
+    typeset -g $varname
+    varcontent="${(P)1}"
+    shift
+    for newvalue in $@; do
+        varcontent="${varcontent%,}${varcontent:+,}${newvalue#,}"
+    done
+    typeset -g $varname="${varcontent%,}"
+}
+
+# Passphrase
+
+setPassphrase() {
+        returnvar=$1
+        typeset -g $returnvar
+	typeset passphrase="" confirmation=""
+        prompt="${2:-passphrase}"
+	while [[ -z "$passphrase" ]]; do
+	    print -n " Enter $prompt   : "
+	    read -rs passphrase
+            print
+	    print -n " Confirm $prompt : "
+	    read -rs confirmation
+            print
+	    #print; read -rs "passphrase?Enter $prompt : "
+	    #echo "\n\n"; read -rs "confirmation?Confirm $prompt    : "
+	    #echo "\n\n"
+	    if [[ "$passphrase" != "$confirmation" ]]; then
+		print "\nInput does not match!"
+		passphrase="" confirmation=""
+	    fi
+	done
+	#print -rn "$passphrase"
+        typeset -g $returnvar="$passphrase"
+	unset passphrase confirmation
+}
+
+# Block Device Related
+
+deviceHasMountpoint() { [[ -n "$(/usr/bin/lsblk -dno MOUNTPOINT $1)" ]]; }
+
+deviceOrChildHasMountpoint() { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $1)" ]]; }
+
+setCurrentBlockItem () {
+    local itemnumber=$1
+    ITEMVALUES=($COLNAMES PATH PARTNUM MOUNTED_BTRFS_SUBVOL)
+    for VALUENAME in $ITEMVALUES; do
+        [[ -z ${BLOCKITEM[$itemnumber,$VALUENAME]:-} ]] \
+	|| typeset -g _$VALUENAME="${BLOCKITEM[$itemnumber,$VALUENAME]}"
+    done
+    if [[ -n ${_CHILD_OF:-} ]]; then
+        local parentitemnumber=${BLOCKITEM_NUM_FROM_LABEL[$_CHILD_OF]:-}
+        for VALUENAME in $ITEMVALUES; do
+            [[ -z ${BLOCKITEM[$parentitemnumber,$VALUENAME]:-} ]] \
+	    || typeset -g _PARENT_$VALUENAME="${BLOCKITEM[$parentitemnumber,$VALUENAME]}"
+        done
+    fi
+}
+
+unsetCurrentBlockItem () {
+    ITEMVALUES=($COLNAMES PATH PARTNUM MOUNTED_BTRFS_SUBVOL)
+    for VALUENAME in $ITEMVALUES; do
+        unset _$VALUENAME
+        unset _PARENT_$VALUENAME
+    done
+}
+
+getParentFilesystemTypeFromLabel () {
+    this_label=$1
+    this_item_num=$BLOCKITEM_NUM_FROM_LABEL[$this_label]
+    parent_label="${BLOCKITEM[$this_item_num,CHILD_OF]:-}"
+    if [[ -n $parent_label ]]; then
+        parent_item_num=$BLOCKITEM_NUM_FROM_LABEL[$parent_label]
+        parent_item_fs="${BLOCKITEM[$parent_item_num,FSTYPE]}"
+        print -n $parent_item_fs
+    else
+        return 1
+    fi
+}
+
+checkForLuksAncestor () {
+    this_label=$1
+    this_item_num=$BLOCKITEM_NUM_FROM_LABEL[$this_label]
+    parent_fs=$(getParentFilesystemTypeFromLabel $this_label)
+    if [[ $parent_fs == luks ]]; then
+        return 0
+    elif [[ -n ${BLOCKITEM[$this_item_num,CHILD_OF]:-} ]]; then
+        checkForLuksAncestor ${BLOCKITEM[$this_item_num,CHILD_OF]}
+    else
+        return 1
+    fi
+}

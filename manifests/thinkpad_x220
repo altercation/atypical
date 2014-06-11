@@ -1,0 +1,5 @@
+# For Thinkpad x220, a basic xmonad installation
+storage_1_clear_btrfs_simple
+video_intel
+gui_xmonad_xmobar
+utils_file

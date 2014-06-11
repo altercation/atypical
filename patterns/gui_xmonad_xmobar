@@ -1,0 +1,3 @@
+PACMAN_CMD xorg xmonad xmonad-contrib xmobar
+AUR_CMD compton-git
+
