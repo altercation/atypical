@@ -1,4 +1,4 @@
-# Patterns Guidelines
+# Installers Guidelines
 
 ## Gui
 
@@ -18,7 +18,7 @@ Btrfs subvolumes can be listed as fstype "btrfs" and as long as their parent vol
 
 Arbitrary columns can be added to this table for use in the scripts below; just be sure that each colume entry has a - (dash) or value for each "cell" in the table. Values that have spaces (example: if you have a LABEL with a space in it) must be space escaped or quoted. For simplicity's sake, I recommend removing whitespac where possible, however.
 
-An example storage pattern file must be named storage_* and contain the following table format variable assigment. See actual sample storage_* files in the same directory as this README for more information.
+An example storage installer file must be named storage_* and contain the following table format variable assigment. See actual sample storage_* files in the same directory as this README for more information.
 
 STORAGE=("${(@f)$(cat <<\
 ==========================================================================

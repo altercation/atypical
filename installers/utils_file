@@ -1,0 +1,1 @@
+PACKAGES[UTIL]+=" file-roller p7zip zip unzip unrar"

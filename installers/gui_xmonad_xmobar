@@ -1,0 +1,2 @@
+PACKAGES[GUI]="xorg xmonad xmonad-contrib xmobar compton-git unclutter"
+

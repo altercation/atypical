@@ -11,6 +11,12 @@ conformToArray () {
 eval "$1=($(print ${(P)1}))"
 }
 
+enableServices () {
+for servicename in $@; do
+    systemctl enable $servicename
+done
+}
+
 removeFromArray() { eval $1=\("\${(@)$1:#$2}"\); }
 
 addToCommaList () {
@@ -106,3 +112,5 @@ checkForLuksAncestor () {
         return 1
     fi
 }
+
+
