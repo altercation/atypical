@@ -26,13 +26,22 @@ With no arguments, atypical uses defaults as listed below in the defaults sectio
 '-----------------------------------------------------------------------'
 FRONTMATTER
 -----------------------------------------------------------------------
+
+# script options
 setopt ERR_EXIT NO_UNSET EXTENDED_GLOB #VERBOSE XTRACE
+#setopt ERR_EXIT NO_UNSET EXTENDED_GLOB VERBOSE XTRACE
+
+# declaration
 typeset -Ag CONFIG INSTALLER \
             MKFS_OPTIONS MOUNT_OPTIONS LUKS_OPTIONS
 typeset -ag MODULES MANIFEST BOOTOPTS STORAGE
+
+# environment
 MOUNT_ROOT=/mnt
 SCRIPT=$(readlink -f "$0"); SCRIPT_PATH=$(dirname "$SCRIPT")
 fpath=(${SCRIPT_PATH}/installers $fpath)
+
+# source externals
 source ${SCRIPT_PATH}/scripts/functions
 MANIFEST_PATH="${SCRIPT_PATH}/manifests/$1"
 if [ -e "${MANIFEST_PATH}" ]; then
@@ -42,15 +51,12 @@ else
     exit
 fi
 
-:<< \
------------------------------------------------------------------------
-DETECT SYSTEM MEMORY - for use in partition/filesystem table
------------------------------------------------------------------------
+# system
 RAM=$(detectMemory)
 
 :<< \
 -----------------------------------------------------------------------
-GENERAL MKFS, LUKS, and MOUNT OPTIONS
+STORAGE OPTIONS
 -----------------------------------------------------------------------
 # These will be applied generally and can be appended on a device by
 # device basis in the storage table (in the storage_* pattern file)
@@ -82,95 +88,77 @@ LUKS_OPTIONS[OPEN_OPTIONS,SSD]='--allow-discards'
 CHECK FOR ROOT - Customization shouldn't be necessary from here on
 -----------------------------------------------------------------------
 if [[ "$(whoami)" != "root" ]]; then
-    print "Must be root to run this install script. Exiting."
-    exit
+    notify "Must be root to run this install script. Exiting."
+    #exit
 fi
 
 :<< \
 '-----------------------------------------------------------------------'
 DISK SELECTION
 -----------------------------------------------------------------------
-# Create list of drives
-# Remove mounted drives from list
-drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
-print "FULL LIST OF DRIVES:"
-print -l "$drives"
-print
-for drive in $drives; do deviceOrChildHasMountpoint $drive && removeFromArray drives $drive || :; done
-print "----------"
-print "LIST OF DRIVES WITH NO MOUNT:"
-print -l "$drives"
 
-# User selects drive for install
-CONFIRM="" SELECTED=""
-while [[ ! $CONFIRM =~ [Yy] ]]; do
-
-        # List drives
-        echo "\n\n\nAvailable unmounted drives for installation:"
-        echo "--------------------------------------------"
-	for drive in $drives; do print "[$(( i += 1))] $drive ($(/usr/bin/lsblk -dno SIZE $drive))"; done
-
-        # Pick drive or quit
-	echo -n "\nPlease enter the number of the drive you wish to install to, or 'q' to quit: (1$((($i > 1)) && echo "-$i")/q) "
-	while [[ -z $SELECTED || ! $SELECTED =~ [1-$i] && ! ${(L)SELECTED} == "q" ]]; do print -n "\b \b"; read -k 1 SELECTED || :; done # read returns an error code at EOF, so we ignore it
-        if [[ $SELECTED == "q" ]]; then echo; exit; fi
-
-        # Identify as SSD or standard
-	echo -n "\nIs $drives[$SELECTED] an SSD? (y/N):"
-        read -k SSD || :; [[ ${(L)SSD} == y ]] && SSD="" || unset SSD; echo
-
-        # Summarize and confirm
-	echo -n "\n\nYou have selected $drives[$SELECTED] for COMPLETE ERASURE, and identified it as ${SSD-NOT }an SSD. Enter'y' to continue or 'n' to make changes or 'q' to quit: (y/N/q) "
-        read -k CONFIRM ||:; echo
-        [[ ${(L)CONFIRM} == "q" ]] && exit || :
-
-done
-
-DRIVE=$drives[$SELECTED]
+# interactively selects installation target and assigns to var DRIVE
+#selectInstallTarget DRIVE
+DRIVE=dummydrive
+notifySection "Installation to $DRIVE beginning..."
 
 :<< \
 -----------------------------------------------------------------------
 READ & PARSE STORAGE TABLE
 -----------------------------------------------------------------------
-STORAGE=("${(@f)$(egrep -v "^#|^$" ${SCRIPT_PATH}/storage/${CONFIG[STORAGE]})}")
 
-echo "\n\nInstallation to $DRIVE beginning...\n\n"
+STORAGE_TABLE_FILEPATH="${SCRIPT_PATH}/storage/${CONFIG[STORAGE]}"
+STORAGE_TABLE=("${(@f)$(egrep -v "^#|^$" "${STORAGE_TABLE_FILEPATH}")}")
 
-# Parse blockitem table
-COLNAMES=($(print ${STORAGE[1]}))
-unset "STORAGE[1,2]" # remove column header
-TABLEVAL=($(print ${STORAGE[@]}));
-NUM_OF_STORAGE_ITEMS=$(( ${#TABLEVAL} / ${#COLNAMES} ))
-if (( ${#TABLEVAL} > (${#COLNAMES} * $NUM_OF_STORAGE_ITEMS) )); then
-    print "\nBLOCK DEVICE TABLE FORMAT ERROR!"
-    print "Check that the block device table is properly formatted and that there there is one item per label per row.\nExiting.\n"
+extractFieldNames   STORAGE_TABLE STORAGE_FIELD_NAMES
+extractFieldValues  STORAGE_TABLE STORAGE_FIELD_VALUES
+parseTableToRecords STORAGE_FIELD_VALUES \
+                    STORAGE_FIELD_NAMES \
+                    NUM_STORAGE_RECORDS \
+                    STORAGE_RECORD
+
+# If parseTableToRecords found a mismatch in the table formatting
+# then it throws an error. Handle it here.
+if (( $? > 0 )); then
+    print "\n\nERROR: Failed to parse storage table; check table format."
     exit
 fi
 
-# Assign values to blockitems
-typeset -A BLOCKITEM
-ITERATION=0
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    for COLINDEX in {1..${#COLNAMES}}; do
-        TABLE_CELL_VALUE="$TABLEVAL[$((${#COLNAMES} * $ITERATION + $COLINDEX))]"
-        [[ ! "$TABLE_CELL_VALUE" =~ [_-] ]] && BLOCKITEM[${BLOCKITEM_NUM},${COLNAMES[$COLINDEX]}]="$TABLEVAL[$((${#COLNAMES} * $ITERATION + $COLINDEX))]" || :
-        #DEBUG echo "${BLOCKITEM_NUM},${COLNAMES[$COLINDEX]}: ${BLOCKITEM[${BLOCKITEM_NUM},${COLNAMES[$COLINDEX]}]:-NOT SET}"
-    done
-    ITERATION=$(( $ITERATION + 1 ))
-done
-
-# Create utility reverse-lookup arrays
-typeset -A BLOCKITEM_NUM_FROM_LABEL BLOCKITEM_NUM_FROM_MOUNT_POINT
-PARTNUM=0
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    BLOCKITEM_NUM_FROM_LABEL[$_LABEL]=${BLOCKITEM_NUM}
-    [[ -z ${_MOUNT_POINT:-} ]] || BLOCKITEM_NUM_FROM_MOUNT_POINT[$_MOUNT_POINT]=${BLOCKITEM_NUM}
-    unsetCurrentBlockItem
-done
-ALL_MOUNTS=($(print -l ${(k)BLOCKITEM_NUM_FROM_MOUNT_POINT} | sort))
+# Ordered list of mounts for use in later loops.
+# Useful in particular so that we have a naturally ordered list
+# of mounts from / on down.
+MOUNT_POINTS=(${(vo)STORAGE_RECORD[(I)*,MOUNT_POINT]})
 
 # Assemble install paths
+# Assign the parent device/storage container path to it's children
+_partition_index=0
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setCurrentRecordFromTable $_record_index STORAGE_FIELD_NAMES STORAGE_RECORD
+    if [[ -z ${_CHILD_OF:-} ]]; then
+        (( _partition_index += 1 ))
+        BLOCKITEM[${BLOCKITEM_NUM},PARTNUM]=$PARTNUM
+        BLOCKITEM[${BLOCKITEM_NUM},PATH]=${DRIVE}${PARTNUM}
+    elif [[ ${(L)_PARENT_FSTYPE} == "luks" ]]; then
+        BLOCKITEM[${BLOCKITEM_NUM},PATH]=/dev/mapper/${_PARENT_LABEL}
+    elif [[ ${(L)_PARENT_FSTYPE} == "btrfs" && ${(L)_FSTYPE} == "btrfs" ]]; then
+        # a btrfs subvolume
+        # child items must always follow parent items in table for this to work
+        BLOCKITEM[${BLOCKITEM_NUM},PATH]=$_PARENT_PATH
+        BLOCKITEM[${BLOCKITEM_NUM},BTRFS,SUBVOLUME]=true
+    else
+        print "Unknown parent/child relationship found for block table entry ${BLOCKITEM_NUM} ($_LABEL)."
+        print "Child FSTYPE:  $_FSTYPE"
+        print "Parent FSTYPE: $_PARENT_FSTYPE"
+        print "Exiting."
+        exit
+    fi
+    unsetCurrentBlockItem
+
+done
+exit
+
+# Assemble install paths
+
 PARTNUM=0
 for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
     setCurrentBlockItem $BLOCKITEM_NUM

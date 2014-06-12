@@ -8,7 +8,7 @@ CONFIG[LOCALE,CONF]="en_US.UTF-8"
 CONFIG[CONSOLEFONT]="Lat2-Terminus16"
 CONFIG[USER,NAME]="es"
 CONFIG[USER,SHELL]="zsh"
-CONFIG[STORAGE]="btrfs_simple"
+CONFIG[STORAGE]="encrypt_btrfs_subvols"
 
 # to be run as root
 INSTALLER[VIDEO]="video_intel"
