@@ -11,15 +11,7 @@ Usage:
 
 atypical my_manifest_filename
 
-Takes a filename (not path) as a single argument. This file is then
-sourced from any available subdirectory of the script parent directory.
-The file is assumed to be a manifest file which contains a list of
-patterns to load from the patterns subdirectory. This manifest file
-would contain a single variable assigment like this:
-
-MANIFEST=(storage_1_clear_btrfs_simple xorg_full video_intel gui_xmonad utils_file)
-
-With no arguments, atypical uses defaults as listed below in the defaults section.
+(see manifests subdirectory)
 -----------------------------------------------------------------------
 
 :<< \
@@ -89,7 +81,7 @@ CHECK FOR ROOT - Customization shouldn't be necessary from here on
 -----------------------------------------------------------------------
 if [[ "$(whoami)" != "root" ]]; then
     notify "Must be root to run this install script. Exiting."
-    #exit
+    #DEBUG exit
 fi
 
 :<< \
@@ -98,7 +90,7 @@ DISK SELECTION
 -----------------------------------------------------------------------
 
 # interactively selects installation target and assigns to var DRIVE
-#selectInstallTarget DRIVE
+#DEBUG selectInstallTarget DRIVE
 DRIVE=dummydrive
 notifySection "Installation to $DRIVE beginning..."
 
@@ -107,15 +99,18 @@ notifySection "Installation to $DRIVE beginning..."
 READ & PARSE STORAGE TABLE
 -----------------------------------------------------------------------
 
+# location of storage table file, taken from manifest variable
 STORAGE_TABLE_FILEPATH="${SCRIPT_PATH}/storage/${CONFIG[STORAGE]}"
-STORAGE_TABLE=("${(@f)$(egrep -v "^#|^$" "${STORAGE_TABLE_FILEPATH}")}")
+
+# note use of 'e' expansion flag to parse variables like $RAM
+STORAGE_TABLE=("${(@ef)$(egrep -v "^#|^$" "${STORAGE_TABLE_FILEPATH}")}")
 
 extractFieldNames   STORAGE_TABLE STORAGE_FIELD_NAMES
 extractFieldValues  STORAGE_TABLE STORAGE_FIELD_VALUES
 parseTableToRecords STORAGE_FIELD_VALUES \
                     STORAGE_FIELD_NAMES \
                     NUM_STORAGE_RECORDS \
-                    STORAGE_RECORD
+                    STORAGE_RECORDS
 
 # If parseTableToRecords found a mismatch in the table formatting
 # then it throws an error. Handle it here.
@@ -127,78 +122,74 @@ fi
 # Ordered list of mounts for use in later loops.
 # Useful in particular so that we have a naturally ordered list
 # of mounts from / on down.
-MOUNT_POINTS=(${(vo)STORAGE_RECORD[(I)*,MOUNT_POINT]})
+MOUNT_POINTS=(${(vo)STORAGE_RECORDS[(I)*,MOUNT_POINT]})
+
+:<< \
+-----------------------------------------------------------------------
+PROCESS STORAGE TABLE DATA
+-----------------------------------------------------------------------
 
 # Assemble install paths
 # Assign the parent device/storage container path to it's children
+# The table is positionally semantic, i.e. order matters though
+# only for the assignment of /dev/sdx# partition numbers
 _partition_index=0
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
-    setCurrentRecordFromTable $_record_index STORAGE_FIELD_NAMES STORAGE_RECORD
-    if [[ -z ${_CHILD_OF:-} ]]; then
+    setActiveStorageRecordWithPrefix $_record_index _record
+    if (( ${_record_parent_index:-0} == 0 ));
+    then # no parent, so partition path will be something like /dev/sdx1
         (( _partition_index += 1 ))
-        BLOCKITEM[${BLOCKITEM_NUM},PARTNUM]=$PARTNUM
-        BLOCKITEM[${BLOCKITEM_NUM},PATH]=${DRIVE}${PARTNUM}
-    elif [[ ${(L)_PARENT_FSTYPE} == "luks" ]]; then
-        BLOCKITEM[${BLOCKITEM_NUM},PATH]=/dev/mapper/${_PARENT_LABEL}
-    elif [[ ${(L)_PARENT_FSTYPE} == "btrfs" && ${(L)_FSTYPE} == "btrfs" ]]; then
-        # a btrfs subvolume
-        # child items must always follow parent items in table for this to work
-        BLOCKITEM[${BLOCKITEM_NUM},PATH]=$_PARENT_PATH
-        BLOCKITEM[${BLOCKITEM_NUM},BTRFS,SUBVOLUME]=true
+        STORAGE_RECORDS[${_record_index},PART_IDX]=$_partition_index
+        STORAGE_RECORDS[${_record_index},PART_PATH]=${DRIVE}$_partition_index
+    elif [[ ${(L)_record_parent_fstype} == "luks" ]];
+    then # luks child, so /dev/mapper/parentlabel path
+        _mapped_part_path=/dev/mapper/$_record_parent_label
+        STORAGE_RECORDS[${_record_index},PART_PATH]=$_mapped_part_path
+    elif [[ ${(L)_record_parent_fstype} == "btrfs" ]];
+    then # btrfs subvolume (children must always follow parents in table for
+         # this to work unless I change the logic of this loop)
+        STORAGE_RECORDS[${_record_index},PART_PATH]=$_record_parent_part_path
+        STORAGE_RECORDS[${_record_index},BTRFS,SUBVOLUME]=true
     else
-        print "Unknown parent/child relationship found for block table entry ${BLOCKITEM_NUM} ($_LABEL)."
-        print "Child FSTYPE:  $_FSTYPE"
-        print "Parent FSTYPE: $_PARENT_FSTYPE"
-        print "Exiting."
-        exit
+        print "\n\nERROR: Unknown parent/child relationship found."
+        print "Storage table entry #${_record_index}, label: ($_record_label)"
+        print "Child FSTYPE:  $_record_fstype"
+        print "Parent FSTYPE: $_record_parent_fstype"
+        print "\nExiting.\n"
+        exit 1
     fi
-    unsetCurrentBlockItem
-
+    unsetActiveStorageRecordWithPrefix _record
 done
+
+dumpArray STORAGE_RECORDS
+print "RAM is $RAM"
+print "\n\n2 size is ${STORAGE_RECORDS[2,SIZE]}"
 exit
 
-# Assemble install paths
-
-PARTNUM=0
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    if [[ -z ${_CHILD_OF:-} ]]; then
-        (( PARTNUM += 1 ))
-        BLOCKITEM[${BLOCKITEM_NUM},PARTNUM]=$PARTNUM
-        BLOCKITEM[${BLOCKITEM_NUM},PATH]=${DRIVE}${PARTNUM}
-    elif [[ ${(L)_PARENT_FSTYPE} == "luks" ]]; then
-        BLOCKITEM[${BLOCKITEM_NUM},PATH]=/dev/mapper/${_PARENT_LABEL}
-    elif [[ ${(L)_PARENT_FSTYPE} == "btrfs" && ${(L)_FSTYPE} == "btrfs" ]]; then
-        # a btrfs subvolume
-        # child items must always follow parent items in table for this to work
-        BLOCKITEM[${BLOCKITEM_NUM},PATH]=$_PARENT_PATH
-        BLOCKITEM[${BLOCKITEM_NUM},BTRFS,SUBVOLUME]=true
-    else
-        print "Unknown parent/child relationship found for block table entry ${BLOCKITEM_NUM} ($_LABEL)."
-        print "Child FSTYPE:  $_FSTYPE"
-        print "Parent FSTYPE: $_PARENT_FSTYPE"
-        print "Exiting."
-        exit
-    fi
-    unsetCurrentBlockItem
-done
-
 # Create partitioning command
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    if [[ -n ${_CODE:-} ]]; then 
-        [[ ${(L)_SIZE} == max ]] && new_cmd="--largest-new=$_PARTNUM" || new_cmd="--new=$_PARTNUM:0:+${_SIZE}"
-        [[ ${(L)_LABEL} == boot || ${(L)_LABEL} == efi ]] && eval attr_cmd="--attributes=$_PARTNUM\:set\:0" || attr_cmd="" 
+            #&& eval attr_cmd="--attributes=$_PARTNUM\:set\:0" \
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setActiveStorageRecordWithPrefix $_record_index _record
+    if [[ -n ${$_record_code:-} ]]; then 
+        if [[ ${(L)$_record_size} == "max" ]]; then
+        # using maximum available space on drive for this partition
+            new_cmd="--largest-new=$_PARTNUM"
+        else
+        # using a specific size for the space on the drive
+            new_cmd="--new=$_PARTNUM:0:+${_SIZE}"
+        fi
+        [[ ${(L)$(storageGetField LABEL $_record_index)} == boot \
+        || ${(L)$(storageGetField LABEL $_record_index)} == efi ]] \
+            && attr_cmd="--attributes=$(storageGetField PART_IDX $_record_index):set:0" \
+            || attr_cmd="" 
         sgdisk_cmd="${sgdisk_cmd:-} $new_cmd --typecode=$_PARTNUM:${BLOCKITEM[$BLOCKITEM_NUM,CODE]} --change-name=$_PARTNUM:${BLOCKITEM[$BLOCKITEM_NUM,LABEL]} $attr_cmd"
     fi
-    unsetCurrentBlockItem
+    unsetActiveStorageRecordWithPrefix _record
 done
 sgdisk_cmd="${sgdisk_cmd:-} ${DRIVE}"
 
-# Test Output of all table key value pairs
-#print "$(for BLOCKITEMKEY in ${(k)BLOCKITEM}; do echo -e "$BLOCKITEMKEY:\t\t${BLOCKITEM[$BLOCKITEMKEY]}"; done)" | sort
-#echo "sgdisk $sgdisk_cmd"
-#exit
+print "sgdisk $sgdisk_cmd"
+exit
 
 :<< \
 '-----------------------------------------------------------------------'

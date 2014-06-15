@@ -54,14 +54,15 @@ done
 removeFromArray() { eval $1=\("\${(@)$1:#$2}"\); }
 
 addToCommaList () {
-    varname=$1
-    typeset -g $varname
-    varcontent="${(P)1}"
+    local _var_name=$1
+    typeset -g $_var_name
+    local _var_content="${(P)1}"
     shift
-    for newvalue in $@; do
-        varcontent="${varcontent%,}${varcontent:+,}${newvalue#,}"
+    local _new_value
+    for _new_value in $@; do
+        _var_content="${_var_content%,}${_var_content:+,}${_new_value#,}"
     done
-    typeset -g $varname="${varcontent%,}"
+    typeset -g $_var_name="${_var_content%,}"
 }
 
 # Passphrase
@@ -97,72 +98,28 @@ deviceHasMountpoint() { [[ -n "$(/usr/bin/lsblk -dno MOUNTPOINT $1)" ]]; }
 
 deviceOrChildHasMountpoint() { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $1)" ]] && return 0 || mount | grep $1; }
 
-setCurrentBlockItem () {
-    local itemnumber=$1
-    ITEMVALUES=($COLNAMES PATH PARTNUM MOUNTED_BTRFS_SUBVOL)
-    for VALUENAME in $ITEMVALUES; do
-        [[ -z ${BLOCKITEM[$itemnumber,$VALUENAME]:-} ]] \
-	|| typeset -g _$VALUENAME="${BLOCKITEM[$itemnumber,$VALUENAME]}"
-    done
-    if [[ -n ${_CHILD_OF:-} ]]; then
-        local parentitemnumber=${BLOCKITEM_NUM_FROM_LABEL[$_CHILD_OF]:-}
-        for VALUENAME in $ITEMVALUES; do
-            [[ -z ${BLOCKITEM[$parentitemnumber,$VALUENAME]:-} ]] \
-	    || typeset -g _PARENT_$VALUENAME="${BLOCKITEM[$parentitemnumber,$VALUENAME]}"
-        done
-    fi
-}
+getFieldFromRecordInTable () {
+	local _field_name=$1
+	local _record_index=$2
+	local _table_array_name=$3
+	#_return_variable_name=$4
+	#typeset -g $4
+	#eval $_return_variable_name'="${(@)'$_table_array_name'[$_record_index,$_field_name]:-}"'
+	eval 'print "${(@)'$_table_array_name'[$_record_index,$_field_name]:-}"'
+	}
 
-unsetCurrentBlockItem () {
-    ITEMVALUES=($COLNAMES PATH PARTNUM MOUNTED_BTRFS_SUBVOL)
-    for VALUENAME in $ITEMVALUES; do
-        unset _$VALUENAME
-        unset _PARENT_$VALUENAME
-    done
-}
-
-setCurrentRecordFromTable () {
-    _record_index=$1
-    _record_field_names_ref=$2
-    _table_values_ref=$3
-    _record_fields=($_record_field_names PATH PARTITION_NUM MOUNTED_BTRFS_SUBVOL)
-    for _field_name in $_record_fields; do
-        [[ -z ${(P)_table_values_ref[$_record_index,$_field_name]:-} ]] \
-	|| typeset -g _$_field_name="${(P)_table_values_ref[$_record_index,$_field_name]}"
-    done
-    if [[ -n ${_CHILD_OF:-} ]]; then
-        #local _parent_item_number=${BLOCKITEM_NUM_FROM_LABEL[$_CHILD_OF]:-}
-        local _parent_item_number=${(P)_table_values_ref[xxx$_CHILD_OF]:-}
-        for VALUENAME in $ITEMVALUES; do
-            [[ -z ${BLOCKITEM[$parentitemnumber,$VALUENAME]:-} ]] \
-	    || typeset -g _PARENT_$VALUENAME="${BLOCKITEM[$parentitemnumber,$VALUENAME]}"
-        done
-    fi
-}
-
-getParentFilesystemTypeFromLabel () {
-    this_label=$1
-    this_item_num=$BLOCKITEM_NUM_FROM_LABEL[$this_label]
-    parent_label="${BLOCKITEM[$this_item_num,CHILD_OF]:-}"
-    if [[ -n $parent_label ]]; then
-        parent_item_num=$BLOCKITEM_NUM_FROM_LABEL[$parent_label]
-        parent_item_fs="${BLOCKITEM[$parent_item_num,FSTYPE]}"
-        print -n $parent_item_fs
+storageGetLuksAncestorIndex () {
+    local _record_index=$1
+    # check for parent
+    [[ -n "$(storageGetFieldValue CHILD_OF $_record_index)" ]] || return
+    # still here, must have a parent
+    if [[ "${(L)$(storageGetParentField FSTYPE $_record_index)}" == "luks" ]]; then
+        # parent is luks
+        storageGetParentIndex $_record_index
+        return
     else
-        return 1
-    fi
-}
-
-checkForLuksAncestor () {
-    this_label=$1
-    this_item_num=$BLOCKITEM_NUM_FROM_LABEL[$this_label]
-    parent_fs=$(getParentFilesystemTypeFromLabel $this_label)
-    if [[ $parent_fs == luks ]]; then
-        return 0
-    elif [[ -n ${BLOCKITEM[$this_item_num,CHILD_OF]:-} ]]; then
-        checkForLuksAncestor ${BLOCKITEM[$this_item_num,CHILD_OF]}
-    else
-        return 1
+        # parent not luks, recurse up to parent
+        storageGetLuksAncestorIndex $(storageGetParentIndex $_record_index)
     fi
 }
 
@@ -171,7 +128,7 @@ assignToVarname=$1
 
 # Create list of drives
 # Remove mounted drives from list
-drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+local drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
 print "FULL LIST OF DRIVES:"
 print -l "$drives"
 print
@@ -181,7 +138,8 @@ print "LIST OF DRIVES WITH NO MOUNT:"
 print -l "$drives"
 
 # User selects drive for install
-CONFIRM="" SELECTED=""
+local CONFIRM=""
+local SELECTED=""
 while [[ ! $CONFIRM =~ [Yy] ]]; do
 
         # List drives
@@ -212,9 +170,9 @@ eval "$assignToVarname=$drives[$SELECTED]"
 extractFieldNames () { typeset -ga $2; eval $2'=($(print ${(P)1[2]};))'; }
 extractFieldValues () { typeset -ga $2; eval $2'=($(print ${(P)1[3,-2]};))'; }
 calculateNumberOfRecords () {
-_num_field_values=${(P)#1}
-_num_field_names=${(P)#2}
-_num_records=$(( ${_num_field_values} / ${_num_field_names} ))
+local _num_field_values=${(P)#1}
+local _num_field_names=${(P)#2}
+local _num_records=$(( ${_num_field_values} / ${_num_field_names} ))
 if (( ${_num_field_values} != (${_num_field_names} * $_num_records) )); then
     return 1
 else
@@ -225,40 +183,49 @@ fi
 }
 
 parseTableToRecords () {
-
-_field_values_ref=$1; typeset -ag $_field_values_ref
-_field_names_ref=$2;  typeset -ag $_field_names_ref
-_num_records_ref=$3;  typeset -g $_num_records_ref
-_result_array_ref=$4; typeset -Ag $_result_array_ref
-
-calculateNumberOfRecords $_field_values_ref $_field_names_ref $_num_records_ref || return 1
-
+local _field_values_ref=$1; typeset -ag $_field_values_ref
+local _field_names_ref=$2;  typeset -ag $_field_names_ref
+local _num_records_ref=$3;  typeset -g $_num_records_ref
+local _result_array_ref=$4; typeset -Ag $_result_array_ref
+calculateNumberOfRecords $_field_values_ref \
+                         $_field_names_ref \
+                         $_num_records_ref || return 1
 # assign to local arrays due to error resulting from taking
 # a count of a dereferenced varaible e.g. ${(P)#_reference} was
 # failing, though uncertain why as it works in other tests and
-# test scripts....
+# test scripts.... TODO DEBUG
 _field_names=(${(P)_field_names_ref})
 _field_values=(${(P)_field_values_ref})
-_iteration=0
+local _iteration=0
+local _record_index
 for _record_index in {1..${(P)_num_records_ref}}; do
     for _field_index in {1..${#_field_names}}; do
-        _field_value="${_field_values[$((${#_field_names} * $_iteration + $_field_index))]}"
+        _field_value="${_field_values[$((${#_field_names} \
+                                           * $_iteration \
+                                           + $_field_index))]}"
         if [[ ! "$_field_value" =~ [_-] ]]; then
-            eval $_result_array_ref'[${_record_index},${_field_names[$_field_index]}]="$_field_values[$((${#_field_names} * $_iteration + $_field_index))]"'
-#create reverse lookup
-#should be able to use subscript flags to do this instead
-            # set record index from fieldname... this will only be used/useful
-            # in cases of unique values like labels and mountpoints, for example
-            eval $_result_array_ref'[RECORD_INDEX_FROM_FIELDNAME,${_field_names[$_field_index]},${_field_value}]=${_record_index}'
+            local _subscript="[${_record_index},${_field_names[$_field_index]}]"
+            eval ${_result_array_ref}${_subscript}=\"$_field_value\"
         fi
     done
     _iteration=$(( $_iteration + 1 ))
 done
 }
 
+lookupRecordByFieldValue () {
+local _field_name=$1
+local _field_value=$2
+local _source_array_name=$3
+#_return_value_name=$4
+#typeset -g $_return_value_name
+#eval $_return_value_name='${(S)${(MS)"${(kv)'$_source_array_name'[(I)*,$_field_name]}"%*[0-9],$_field_name\ $_field_value}%,$_field_name\ $_field_value}'
+eval 'print ${(S)${(MS)"${(kv)'$_source_array_name'[(I)*,$_field_name]}"%*[0-9],$_field_name\ $_field_value}%,$_field_name\ $_field_value}'
+}
+
 dumpArray () {
 # functionally equivalent to 'typeset arrayname',
-# but more readable for testing
+# this function is more readable for testing output but use
+# 'typeset -p arrayname' for actual output to scripts
     for arrayname
     do
         for key in ${(@kP)arrayname}
@@ -280,5 +247,100 @@ print ${(v)arrayname[(I)prefix*]}
 search values in array for a pattern and return the key name:
 print ${(k)arrayname[(r)searchpattern]}
 
+same, return multiple results
+${(k)arrayname[(R)pattern]}
+e.g.
+${(k)mayarray[(R)prefix*]}
+
 
 NOTES--------------------------------
+
+:<< \
+-----------------------------------------------------------------------
+STORAGE TABLE SPECIFIC HELPER FUNCTIONS
+-----------------------------------------------------------------------
+
+# these could be broken out into a script specific lib file, but i
+# want to keep them separate from the state-independent functions
+# - these are mostly state dependent (i.e. they depend on specific
+# variable names)
+
+#setActiveStorageRecord _record_index
+
+storageGetRecordByLabel () {
+    # e.g. storageGetRecordByLabel system
+    lookupRecordByFieldValue LABEL "$1" STORAGE_RECORDS RETURN_VALUE
+    print $RETURN_VALUE
+    }
+
+setActiveStorageRecordWithPrefix () {
+# sets variables equivalent to _prefix_fieldname (converting FIELDNAME to
+# lowercase) for each field name in the storage table (so PATH becomes 
+# _prefix_path, etc.)
+    local _record_index=$1
+    local _parent_index=${$(storageGetParentIndex $_record_index):-0} || :
+    local _prefix=$2
+    local _var_list_name=${3:-${_prefix}_var_list}
+    typeset -ag $_var_list_name
+    #${_prefix}_var_names
+    # following gets all currently set field names for this record
+    _record_fields=(${STORAGE_RECORDS[(I)1,*]#1,})
+    local _field_name
+    for _field_name in $_record_fields; do
+        _var_name="${_prefix}_${(L)_field_name}"
+        typeset -g $_var_name
+        eval $_var_list_name'=(${(P)_var_list_name} $_var_name)'
+        eval $_var_name'="$(getFieldFromRecordInTable \
+                               $_field_name \
+                               $_record_index \
+                               STORAGE_RECORDS)"'
+    done
+    # recursively set parent (and grandparents, etc. though they will
+    # likely not be used)
+    eval $_var_list_name'=(${(P)_var_list_name} ${_prefix}_parent_index)'
+    typeset -g ${_prefix}_parent_index
+    eval ${_prefix}_parent_index'=$_parent_index'
+    if (( ${_parent_index:-} > 0 )); then
+        setActiveStorageRecordWithPrefix $_parent_index \
+                                         ${_prefix}_parent \
+                                         $_var_list_name
+    fi
+    }
+
+unsetActiveStorageRecord () {
+    local _computed_fields=(PARTITION_NUM MOUNTED_BTRFS_SUBVOL)
+    local _record_fields=($STORAGE_FIELD_NAMES $_computed_fields)
+    local _field_name
+    for _field_name in $_record_fields
+    do
+        unset "_$_field_name" "$_PARENT_FIELD_NAME"
+    done
+    }
+
+unsetActiveStorageRecordWithPrefix () {
+    local _prefix=$1
+    local _var_list_name=${_prefix}_var_list
+    local _var_name
+    for _var_name in ${(P)_var_list_name}; do unset $_var_name; done
+    unset $_var_list_name
+    }
+
+storageGetParentIndex () {
+    # eg storageGetParentIndex 2 - gets index of parent of record 2
+    local _record_index=$1
+    local _parent_label="$(getFieldFromRecordInTable CHILD_OF $_record_index STORAGE_RECORDS)"
+    if [[ -n $_parent_label ]]; then
+        lookupRecordByFieldValue LABEL "$_parent_label" STORAGE_RECORDS || return 1
+    else
+        print "0"
+        return 1
+    fi
+}
+
+storageGetParentField () {
+    # eg storageGetParentField LABEL 2 - gets label of parent of record 2
+    local _field_name=$1
+    local _record_index=$2
+    local _parent_index=$(storageGetParentIndex $_record_index) || return 1
+    getFieldFromRecordInTable $_field_name $_record_index STORAGE_RECORDS
+}
