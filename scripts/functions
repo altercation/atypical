@@ -296,7 +296,6 @@ setActiveStorageRecordWithPrefix () {
         _var_name="${_prefix}_${(L)_field_name/,/_}"
         typeset -g $_var_name
         eval $_var_list_name'=(${(P)_var_list_name} $_var_name)'
-        print "setting $_var_name"
         eval $_var_name'="$(getFieldFromRecordInTable \
                                $_field_name \
                                $_record_index \

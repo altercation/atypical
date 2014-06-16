@@ -243,8 +243,6 @@ fi
 MAKE FILESYSTEMS
 -----------------------------------------------------------------------
 
-dumpArray STORAGE_RECORDS
-exit
 # FIRST PASS: isn't luks, doesn't have "child of"
 # (so should be our top level physical partitions)
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
@@ -263,7 +261,6 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     fi
     unsetActiveStorageRecordWithPrefix _record
 done
-exit
 
 # SECOND PASS: isn't luks itself but is "child of" luks
 # (filesystems installed on luks)
