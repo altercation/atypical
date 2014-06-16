@@ -28,6 +28,10 @@ INSTALL () {
     [ -n $@ ] && pacaur --noconfirm --noedit -S $@;
 }
 
+debugActive () {
+[[ "${(L)DEBUG:-false}" == "true" ]] && return 0 | return 1
+}
+
 # System
 
 detectMemory () {
@@ -111,15 +115,15 @@ getFieldFromRecordInTable () {
 storageGetLuksAncestorIndex () {
     local _record_index=$1
     # check for parent
-    [[ -n "$(storageGetFieldValue CHILD_OF $_record_index)" ]] || return
+    [[ -n "$(storageGetFieldValue CHILD_OF $_record_index)" ]] || return 1
     # still here, must have a parent
     if [[ "${(L)$(storageGetParentField FSTYPE $_record_index)}" == "luks" ]]; then
         # parent is luks
         storageGetParentIndex $_record_index
-        return
+        return 0
     else
         # parent not luks, recurse up to parent
-        storageGetLuksAncestorIndex $(storageGetParentIndex $_record_index)
+        storageGetLuksAncestorIndex $(storageGetParentIndex $_record_index) || return $?
     fi
 }
 
@@ -307,16 +311,6 @@ setActiveStorageRecordWithPrefix () {
     fi
     }
 
-unsetActiveStorageRecord () {
-    local _computed_fields=(PARTITION_NUM MOUNTED_BTRFS_SUBVOL)
-    local _record_fields=($STORAGE_FIELD_NAMES $_computed_fields)
-    local _field_name
-    for _field_name in $_record_fields
-    do
-        unset "_$_field_name" "$_PARENT_FIELD_NAME"
-    done
-    }
-
 unsetActiveStorageRecordWithPrefix () {
     local _prefix=$1
     local _var_list_name=${_prefix}_var_list
@@ -343,4 +337,41 @@ storageGetParentField () {
     local _record_index=$2
     local _parent_index=$(storageGetParentIndex $_record_index) || return 1
     getFieldFromRecordInTable $_field_name $_record_index STORAGE_RECORDS
+}
+
+storageGeneratePartitioningCommandForDrive _storage_command () {
+typeset -g $1
+local _drive=$2
+typeset -a _sgdisk_cmd
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setActiveStorageRecordWithPrefix $_record_index _record
+    if [[ -n ${_record_code:-} ]]; then 
+
+        if [[ ${(L)_record_size} == "max" ]]; then
+        # using maximum available space on drive for this partition
+            local _new_cmd="--largest-new=$_record_device_index"
+        else
+        # using a specific size for the space on the drive
+            local _new_cmd="--new=${_record_device_index}:0:+${_record_size}"
+        fi
+
+        if (( ${BOOTABLE_LABELS[(i)${(U)_record_label}]} <= ${#BOOTABLE_LABELS} ));
+        then # this item has a bootable partition label
+            local _attr_cmd="--attributes=${_record_device_index}:set:0"
+        else # not a bootable partition
+            local _attr_cmd="" 
+        fi
+
+        _sgdisk_cmd=( ${_sgdisk_cmd:-}
+                      "$_new_cmd"
+                      "--typecode=${_record_device_index}:${_record_code}"
+                      "--change-name=${_record_device_index}:$_record_label"
+                      "$_attr_cmd" )
+    fi
+    unsetActiveStorageRecordWithPrefix _record
+done
+_sgdisk_cmd=( sgdisk --zap-all "$_drive;"
+              sgdisk --clear "$_drive;"
+              sgdisk ${_sgdisk_cmd:-} "$_drive;")
+eval $1'="$_sgdisk_cmd"'
 }

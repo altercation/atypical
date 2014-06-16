@@ -14,6 +14,8 @@ atypical my_manifest_filename
 (see manifests subdirectory)
 -----------------------------------------------------------------------
 
+DEBUG=false
+
 :<< \
 '-----------------------------------------------------------------------'
 FRONTMATTER
@@ -56,6 +58,11 @@ STORAGE OPTIONS
 # USE COLUMN NAME VARIABLES WITH UNDERSCORE PREFIX FOR RUN TIME REPLACEMENT
 # e.g. $_LABEL in the scalar values below will be replaced with the
 # LABEL field value for the specific block item at run time
+
+
+# labelling a partition with one of these BOOTABLE_LABELS results in
+# the partition being marked as a boot parition
+BOOTABLE_LABELS=(BOOT EFI)
 
 MKFS_OPTIONS[COMMON]=''
 MKFS_OPTIONS[SSD]=''
@@ -139,16 +146,16 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     if (( ${_record_parent_index:-0} == 0 ));
     then # no parent, so partition path will be something like /dev/sdx1
         (( _partition_index += 1 ))
-        STORAGE_RECORDS[${_record_index},PART_IDX]=$_partition_index
-        STORAGE_RECORDS[${_record_index},PART_PATH]=${DRIVE}$_partition_index
+        STORAGE_RECORDS[${_record_index},DEVICE_INDEX]=$_partition_index
+        STORAGE_RECORDS[${_record_index},DEVICE_PATH]=${DRIVE}$_partition_index
     elif [[ ${(L)_record_parent_fstype} == "luks" ]];
     then # luks child, so /dev/mapper/parentlabel path
-        _mapped_part_path=/dev/mapper/$_record_parent_label
-        STORAGE_RECORDS[${_record_index},PART_PATH]=$_mapped_part_path
+        _mapped_device_path=/dev/mapper/$_record_parent_label
+        STORAGE_RECORDS[${_record_index},DEVICE_PATH]=$_mapped_device_path
     elif [[ ${(L)_record_parent_fstype} == "btrfs" ]];
     then # btrfs subvolume (children must always follow parents in table for
          # this to work unless I change the logic of this loop)
-        STORAGE_RECORDS[${_record_index},PART_PATH]=$_record_parent_part_path
+        STORAGE_RECORDS[${_record_index},DEVICE_PATH]=$_record_parent_device_path
         STORAGE_RECORDS[${_record_index},BTRFS,SUBVOLUME]=true
     else
         print "\n\nERROR: Unknown parent/child relationship found."
@@ -162,39 +169,19 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
 done
 
 dumpArray STORAGE_RECORDS
-print "RAM is $RAM"
-print "\n\n2 size is ${STORAGE_RECORDS[2,SIZE]}"
-exit
-
-# Create partitioning command
-            #&& eval attr_cmd="--attributes=$_PARTNUM\:set\:0" \
-for _record_index in {1..$NUM_STORAGE_RECORDS}; do
-    setActiveStorageRecordWithPrefix $_record_index _record
-    if [[ -n ${$_record_code:-} ]]; then 
-        if [[ ${(L)$_record_size} == "max" ]]; then
-        # using maximum available space on drive for this partition
-            new_cmd="--largest-new=$_PARTNUM"
-        else
-        # using a specific size for the space on the drive
-            new_cmd="--new=$_PARTNUM:0:+${_SIZE}"
-        fi
-        [[ ${(L)$(storageGetField LABEL $_record_index)} == boot \
-        || ${(L)$(storageGetField LABEL $_record_index)} == efi ]] \
-            && attr_cmd="--attributes=$(storageGetField PART_IDX $_record_index):set:0" \
-            || attr_cmd="" 
-        sgdisk_cmd="${sgdisk_cmd:-} $new_cmd --typecode=$_PARTNUM:${BLOCKITEM[$BLOCKITEM_NUM,CODE]} --change-name=$_PARTNUM:${BLOCKITEM[$BLOCKITEM_NUM,LABEL]} $attr_cmd"
-    fi
-    unsetActiveStorageRecordWithPrefix _record
-done
-sgdisk_cmd="${sgdisk_cmd:-} ${DRIVE}"
-
-print "sgdisk $sgdisk_cmd"
 exit
 
 :<< \
 '-----------------------------------------------------------------------'
-DISK PREPARATION
+DISK PREPARATION - DESTRUCTIVE
+-----------------------------------------------------------------------
+# Erase drive, create new GPT structure, and create partitions
+storageGeneratePartitioningCommandForDrive _part_command $DRIVE
+print "$_part_command"
+exit
 
+:<< \
+'-----------------------------------------------------------------------'
 # debugging crypto close
 for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
     setCurrentBlockItem $BLOCKITEM_NUM
@@ -205,10 +192,7 @@ for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
 done
 -----------------------------------------------------------------------
 
-# Erase drive, create new GPT structure, and create partitions
-sgdisk --zap-all ${DRIVE}
-sgdisk --clear ${DRIVE}
-eval sgdisk $sgdisk_cmd
+eval "$_part_command"
 
 :<< \
 '-----------------------------------------------------------------------'
@@ -217,10 +201,10 @@ ENCRYPT STORAGE
 
 # Check if we need encryption
 ENCRYPTION=false
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    [[ ${(L)_FSTYPE} == luks ]] && ENCRYPTION=true || :
-    unsetCurrentBlockItem
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setActiveStorageRecordWithPrefix $_record_index _record
+    [[ ${(L)_record_fstype} == luks ]] && ENCRYPTION=true || :
+    unsetActiveStorageRecordWithPrefix _record
 done
 
 if [[ $ENCRYPTION == true ]]; then
@@ -230,14 +214,19 @@ if [[ $ENCRYPTION == true ]]; then
     #PASSPHRASE=DEBUG
 
     # Encrypt partitions
-    for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-        setCurrentBlockItem $BLOCKITEM_NUM
-        if [[ ${(L)_FSTYPE} == luks ]]; then
-        print "Encrypting $_LABEL on $_PATH ... "
-            print -r "$PASSPHRASE" | cryptsetup ${LUKS_OPTIONS[FORMAT_OPTIONS]:-} luksFormat $_PATH
-            print -r "$PASSPHRASE" | cryptsetup open ${LUKS_OPTIONS[OPEN_OPTIONS]:-} ${SSD:-${LUKS_OPTIONS[OPEN_OPTIONS,SSD]:-}} $_PATH $_LABEL
+    for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+        setActiveStorageRecordWithPrefix $_record_index _record
+        if [[ ${(L)_record_fstype} == luks ]]; then
+        print "Encrypting $_record_label on $_record_device_path ... "
+            print -r "$PASSPHRASE" \
+                | cryptsetup ${LUKS_OPTIONS[FORMAT_OPTIONS]:-} \
+                  luksFormat $_record_path
+            print -r "$PASSPHRASE" \
+                | cryptsetup open ${LUKS_OPTIONS[OPEN_OPTIONS]:-} \
+                  ${SSD:-${LUKS_OPTIONS[OPEN_OPTIONS,SSD]:-}} \
+                  $_record_path $_record_label
         fi
-        unsetCurrentBlockItem
+        unsetActiveStorageRecordWithPrefix _record
     done
 
     # Cleanup
@@ -252,99 +241,141 @@ MAKE FILESYSTEMS
 
 # FIRST PASS: isn't luks, doesn't have "child of"
 # (so should be our top level physical partitions)
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    if [[ ${(L)_FSTYPE} != luks && -z ${_CHILD_OF:-} ]]; then
-        MKFS_OPTIONS_COMPILED="${MKFS_OPTIONS[${(U)_FSTYPE}]:-} ${MKFS_OPTIONS[${(U)_FSTYPE},SSD]:-} ${_MKFS_OPTIONS:-}"
-        eval mkfs.${(L)_FSTYPE} $MKFS_OPTIONS_COMPILED ${_PATH}
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setActiveStorageRecordWithPrefix $_record_index _record
+    if [[ ${(L)_record_fstype} != luks && -z ${_record_child_of:-} ]]; then
+        _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
+                                ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
+                                ${_record_mkfs_options:-})
+        eval mkfs.${(L)_record_fstype} $mkfs_options_compiled $_record_path
     fi
-    unsetCurrentBlockItem
+    unsetActiveStorageRecordWithPrefix _record
 done
 
 # SECOND PASS: isn't luks itself but is "child of" luks
 # (filesystems installed on luks)
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    if [[ ${(L)_FSTYPE} != luks && ${(L)_PARENT_FSTYPE:-} == luks ]]; then
-        if [[ ${(L)_FSTYPE} == swap  ]]; then
-            eval mkswap --label $_LABEL $_PATH
-            eval swapon -L $_LABEL
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setActiveStorageRecordWithPrefix $_record_index _record
+    if [[ ${(L)_record_fstype} != luks \
+       && ${(L)_record_parent_fstype:-} == luks ]]; then
+        if [[ ${(L)_record_fstype} == swap  ]]; then
+            eval mkswap --label $_record_label $_record_path
+            eval swapon -L $_record_label
         else
-            MKFS_OPTIONS_COMPILED="${MKFS_OPTIONS[${(U)_FSTYPE}]:-} ${MKFS_OPTIONS[${(U)_FSTYPE},SSD]:-} ${_MKFS_OPTIONS:-}"
-            eval mkfs.${(L)_FSTYPE} $MKFS_OPTIONS_COMPILED ${_PATH}
+            _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
+                                    ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
+                                    ${_record_mkfs_options:-})
+            eval mkfs.${(L)_FSTYPE} $_mkfs_options_compiled ${_record_path}
         fi
     fi
-    unsetCurrentBlockItem
+    unsetActiveStorageRecordWithPrefix _record
 done
 
 # THIRD PASS: isn't luks, is a "child of" but NOT of luks, so probably special case of btrfs subvolumes (or LVM if I choose to implement it)
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    if [[ ${(L)_FSTYPE} != luks && -n ${_CHILD_OF:-} && ${(L)_PARENT_FSTYPE} != luks ]]; then
-        if [[ ${(L)_FSTYPE} == btrfs && ${(L)_PARENT_FSTYPE} == btrfs ]]; then
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setActiveStorageRecordWithPrefix $_record_index _record
+    if [[ ${(L)_record_fstype} != luks \
+       && -n ${_record_child_of:-} \
+       && ${(L)_record_parent_fstype} != luks ]]; then
+        if [[ ${(L)_record_fstype} == btrfs \
+           && ${(L)_record_parent_fstype} == btrfs ]]; then
             # a btrfs subvolume
-            mount $_PARENT_PATH $MOUNT_ROOT
-            if [[ -n ${_MOUNT_POINT#/} && -n ${_PARENT_MOUNT_POINT:-} ]]; then
-            # create the subvolume as a subdirectory of a parent volume that will itself be mounted
-                dirname=${_MOUNT_POINT:t}
-                dirpath=${_MOUNT_POINT:h}
-                MOUNT_POINT=${MOUNT_ROOT%/}/${_MOUNT_POINT#/}
-                mkdir -p ${MOUNT_POINT:h}
-                eval btrfs subvolume create ${MOUNT_POINT%/}/$_LABEL 
+            mount $_record_parent_device_path $MOUNT_ROOT
+            if [[ -n ${_record_mount_point#/} \
+               && -n ${_record_parent_mount_point:-} ]]; then
+               # create the subvolume as a subdirectory of a
+               # parent volume that will itself be mounted
+                dirname=${_record_mount_point:t}
+                dirpath=${_record_mount_point:h}
+                _mount_point=${MOUNT_ROOT%/}/${_record_mount_point#/}
+                mkdir -p ${_mount_point:h}
+                eval btrfs subvolume create ${_mount_point%/}/$_record_label 
             else
-            # create the subvolumes as stand alone "peers" on a parent volume that will not itself be mounted
-                eval "btrfs subvolume create ${MOUNT_ROOT%/}/$_LABEL"
-                eval "BLOCKITEM[$BLOCKITEM_NUM,MOUNT_OPTIONS]=\"${_MOUNT_OPTIONS:-}${_MOUNT_OPTIONS:+,}subvol=$_LABEL\""
-                eval "BLOCKITEM[$BLOCKITEM_NUM,MOUNTED_BTRFS_SUBVOL]=true"
+                # create the subvolumes as stand alone "peers"
+                # on a parent volume that will not itself be mounted
+                #eval "btrfs subvolume create ${MOUNT_ROOT%/}/$_record_label"
+                btrfs subvolume create "${MOUNT_ROOT%/}/$_record_label"
+                eval "STORAGE_RECORDS[${_record_index},MOUNT_OPTIONS]=\"${_record_mount_options:-}${_record_mount_options:+,}subvol=$_record_label\""
+                eval "STORAGE_RECORDS[${_record_index},MOUNTED_BTRFS_SUBVOL]=true"
             fi
             umount $MOUNT_ROOT
         else
             # some case I haven't built for yet
-            print "Filesystem of type $_FSTYPE set as child of parent device with filesystem of type $_FSTYPE: No procedure set for this condition. Exiting."
+            print -n "Filesystem of type $_FSTYPE set as child of parent "
+            print "device with filesystem of type $_record_fstype: "
+            print "No procedure set for this condition. Exiting."
             exit 1
         fi
     fi
-    unsetCurrentBlockItem
+    unsetActiveStorageRecordWithPrefix _record
 done
 
 # Mount
-for MOUNT_POINT in $ALL_MOUNTS; do
+for _mount_point in $MOUNT_POINTS; do
 
-    setCurrentBlockItem $BLOCKITEM_NUM_FROM_MOUNT_POINT[$MOUNT_POINT]
-    MOUNT_OPTIONS_COMPILED=""
+    _record_index=$(lookupRecordByFieldValue \
+                    MOUNT_POINT "$_mount_point" STORAGE_RECORDS)
 
-    # build mount option list
-    addToCommaList MOUNT_OPTIONS_COMPILED ${_MOUNT_OPTIONS:-} ${MOUNT_OPTIONS[COMMON]:-} ${MOUNT_OPTIONS[${(U)_FSTYPE}]:-}
-    if [[ -n ${SSD:-} ]]; then addToCommaList MOUNT_OPTIONS_COMPILED ${MOUNT_OPTIONS[SSD]:-} ${MOUNT_OPTIONS[${(U)_FSTYPE},SSD]:-}; fi
-    if checkForLuksAncestor $_LABEL; then addToCommaList MOUNT_OPTIONS_COMPILED ${MOUNT_OPTIONS[LUKS]:-}; fi
+    setActiveStorageRecordWithPrefix $_record_index _record
 
+    _mount_options_compiled=""
+
+    # build mount option list:
+    # --------------------------------------
+    # add common and record specific options
+    addToCommaList _mount_options_compiled \
+                   ${_record_mount_options:-} \
+                   ${MOUNT_OPTIONS[COMMON]:-} \
+                   ${MOUNT_OPTIONS[${(U)_record_fstype}]:-}
+
+    # add ssd common and record specific options
+    [[ -n ${SSD:-} ]] && \
+    addToCommaList _mount_options_compiled \
+                   ${MOUNT_OPTIONS[SSD]:-} \
+                   ${MOUNT_OPTIONS[${(U)_record_fstype},SSD]:-} || :
+
+    # add luks specific options if there is a luks ancestor
+    # (if we are in an encrypted container)
+    storageGetLuksAncestorIndex $_record_index &>/dev/null && \
+    addToCommaList _mount_options_compiled
+                   ${MOUNT_OPTIONS[LUKS]:-} || :
+
+    # build mount point:
+    # --------------------------------------
     # take table mount point and combine with system install mount point
-    MOUNT_POINT=${MOUNT_ROOT%/}/${_MOUNT_POINT#/}
+    _mount_point_compiled=${MOUNT_ROOT%/}/${_record_mount_point#/}
 
     # handle possible btrfs subvolume specific issues
-    if [[ -n ${_PARENT_MOUNT_POINT:-} ]]; then
-        PARENT_MOUNT_POINT=${MOUNT_ROOT%/}/${_PARENT_MOUNT_POINT#/}
-        if findmnt $PARENT_MOUNT_POINT &>/dev/null; then
-            # if parent btrfs volume is mounted, the subvolumes are already present... don't need to do anything here?
-            #mkdir -p ${MOUNT_POINT}
+    if [[ -n ${_record_parent_mount_point:-} ]]; then
+        _parent_mount_point=${MOUNT_ROOT%/}/${_record_parent_mount_point#/}
+        if findmnt $_parent_mount_point &>/dev/null; then
+            # if parent btrfs volume is mounted, the subvolumes
+            # are already present... don't need to do anything here?
+            #mkdir -p ${_mount_point_compiled}
             :
         else
-            print "Parent device not mounted but required for mounting of filesystem (likely a btrfs subvolume)."
-            print "Parent: $_PARENT_LABEL  Attempting to mount: $_LABEL"
+            print -n "Parent device not mounted but required for mounting of "
+            print "filesystem (likely a btrfs subvolume)."
+            print "    Parent: $_record_parent_label"
+            print "    Attempting to mount: $_record_label"
             exit
         fi
     fi
-    #mount $MOUNT_OPTIONS ${_PATH} ${MOUNT_ROOT%/}/${_MOUNT_POINT#/}
-    [[ -n ${_MOUNTED_BTRFS_SUBVOL:-} ]] && LABEL=$_PARENT_LABEL || LABEL=$_LABEL
-    MOUNT_POINT=${MOUNT_ROOT%/}/${_MOUNT_POINT#/}
-    mkdir -p ${MOUNT_POINT}
-    eval "mount -o $MOUNT_OPTIONS LABEL=$LABEL $MOUNT_POINT"
-    unsetCurrentBlockItem
+
+    # label based on btrfs subvolume or not
+    [[ -n ${_record_mounted_btrfs_subvol:-} ]] \
+    && _label=$_record_parent_label \
+    || _label=$_record_label
+
+    # prepare and execute mount
+    mkdir -p ${_compiled_mount_point}
+    eval "mount -o $_mount_options_compiled \
+                   LABEL=$_label \
+                   $_mount_point_compiled"
+
+    unsetActiveStorageRecordWithPrefix _record
 
 done
-
-# Make fstab
-#mkdir -p ${MOUNT_ROOT%/}/etc
 
 :<< \
 -----------------------------------------------------------------------
@@ -361,28 +392,36 @@ mv $MOUNT_ROOT/boot/EFI/BOOT/refind_x86.efi $MOUNT_ROOT/boot/EFI/BOOT/bootx86.ef
 CREATE CHROOT SCRIPT; CHROOT, COMPLETION, CLEANUP
 -----------------------------------------------------------------------
 # extract everything after this section with necessary variables prefixed
+
+# initialize new script
 CHROOT_SCRIPT_NAME=atypical-chroot
-echo "#!/usr/bin/zsh" >> $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
-typeset -f INSTALL >> $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
-echo "declare -A CONFIG" >> $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
-cat ${SCRIPT_PATH}/scripts/functions >> $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
+CHROOT_SCRIPT_PATH="$MOUNT_ROOT/$CHROOT_SCRIPT_NAME"
+echo "#!/usr/bin/zsh" >> "$CHROOT_SCRIPT_PATH"
 
+# dump required variables and arrays into new script
 function {
-	#for key in "${!CONFIG[@]}"
-	for arrayname
-	do
-		for key in "${!$arrayname[@]}"
-		do    
-		    #echo "CONFIG[$key]=\"${CONFIG[$key]}\"" >> $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
-		    echo "$arrayname[$key]=\"${$arrayname[$key]}\"" >> $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
-		done
-	done
-} CONFIG MKFS_OPTIONS MOUNT_OPTIONS LUKS_OPTIONS
+for _param
+do
+    typeset -p $_param >> "$CHROOT_SCRIPT_PATH"
+done
+} INSTALL CONFIG MKFS_OPTIONS MOUNT_OPTIONS LUKS_OPTIONS STORAGE_RECORDS
 
-sed -n "/>\{10\}/,$ p" "$0" >> $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
-chmod +x $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
+# dump functions into script
+cat ${SCRIPT_PATH}/scripts/functions >> "$CHROOT_SCRIPT_PATH"
 
-arch-chroot $MOUNT_ROOT $CHROOT_SCRIPT_NAME; rm $MOUNT_ROOT/$CHROOT_SCRIPT_NAME;
+# dump remainder of file into chroot script
+sed -n "/>\{10\}/,$ p" "$SCRIPT_PATH" >> "$CHROOT_SCRIPT_PATH"
+chmod +x "$CHROOT_SCRIPT_PATH"
+
+#DEBUG
+print "CHECK CHROOT SCRIPT"
+exit
+
+# chroot
+arch-chroot $MOUNT_ROOT "$CHROOT_SCRIPT_NAME"
+
+# post chroot cleanup
+rm $MOUNT_ROOT/$CHROOT_SCRIPT_NAME
 umount -R $MOUNT_ROOT/boot; umount -R $MOUNT_ROOT; cryptsetup close crypt
 echo "check mkinitcpio.conf, efi boot params, etc. and then reboot"; exit
 #reboot
