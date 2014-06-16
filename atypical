@@ -184,8 +184,12 @@ DISK PREPARATION - DESTRUCTIVE
 
 :<< \
 '-----------------------------------------------------------------------'
+DEBUG for second pass
 -----------------------------------------------------------------------
-# debugging crypto close
+# DEBUGGING - turn off active swap
+swapoff -a
+
+# DEBUGGING close any open crypt devices 
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     setActiveStorageRecordWithPrefix $_record_index _record
     if [[ ${(L)_record_fstype} == luks ]]; then
