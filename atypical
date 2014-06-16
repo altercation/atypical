@@ -382,7 +382,7 @@ for _mount_point in $MOUNT_POINTS; do
     || _label=$_record_label
 
     # prepare and execute mount
-    mkdir -p ${_compiled_mount_point}
+    mkdir -p ${_mount_point_compiled}
     eval "mount -o $_mount_options_compiled \
                    LABEL=$_label \
                    $_mount_point_compiled"
