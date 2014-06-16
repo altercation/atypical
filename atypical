@@ -275,7 +275,7 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
             _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
                                     ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
                                     ${_record_mkfs_options:-})
-            eval mkfs.${(L)_FSTYPE} $_mkfs_options_compiled ${_record_device_path}
+            eval mkfs.${(L)_record_fstype} $_mkfs_options_compiled ${_record_device_path}
         fi
     fi
     unsetActiveStorageRecordWithPrefix _record
