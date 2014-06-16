@@ -14,8 +14,6 @@ atypical my_manifest_filename
 (see manifests subdirectory)
 -----------------------------------------------------------------------
 
-DEBUG=false
-
 :<< \
 '-----------------------------------------------------------------------'
 FRONTMATTER
@@ -59,6 +57,9 @@ STORAGE OPTIONS
 # e.g. $_LABEL in the scalar values below will be replaced with the
 # LABEL field value for the specific block item at run time
 
+# NOTE -- Updated format - using _record_label instead of _LABEL to
+# refer to record specific values to be replaced at run time
+
 
 # labelling a partition with one of these BOOTABLE_LABELS results in
 # the partition being marked as a boot parition
@@ -66,9 +67,9 @@ BOOTABLE_LABELS=(BOOT EFI)
 
 MKFS_OPTIONS[COMMON]=''
 MKFS_OPTIONS[SSD]=''
-MKFS_OPTIONS[FAT]='-F32 -n $_LABEL'
+MKFS_OPTIONS[FAT]='-F32 -n $_record_label'
 MKFS_OPTIONS[FAT,SSD]=''
-MKFS_OPTIONS[BTRFS]='--force --label $_LABEL'
+MKFS_OPTIONS[BTRFS]='--force --label $_record_label'
 MKFS_OPTIONS[BTRFS,SSD]='--metadata single' # see man mkfs.btrfs
 
 MOUNT_OPTIONS[COMMON]='rw'
@@ -88,7 +89,6 @@ CHECK FOR ROOT - Customization shouldn't be necessary from here on
 -----------------------------------------------------------------------
 if [[ "$(whoami)" != "root" ]]; then
     notify "Must be root to run this install script. Exiting."
-    #DEBUG exit
 fi
 
 :<< \
@@ -97,8 +97,8 @@ DISK SELECTION
 -----------------------------------------------------------------------
 
 # interactively selects installation target and assigns to var DRIVE
-#DEBUG selectInstallTarget DRIVE
-DRIVE=dummydrive
+
+selectInstallTarget DRIVE
 notifySection "Installation to $DRIVE beginning..."
 
 :<< \
@@ -168,30 +168,25 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     unsetActiveStorageRecordWithPrefix _record
 done
 
-dumpArray STORAGE_RECORDS
-exit
-
 :<< \
 '-----------------------------------------------------------------------'
 DISK PREPARATION - DESTRUCTIVE
 -----------------------------------------------------------------------
-# Erase drive, create new GPT structure, and create partitions
-storageGeneratePartitioningCommandForDrive _part_command $DRIVE
-print "$_part_command"
-exit
 
 :<< \
 '-----------------------------------------------------------------------'
-# debugging crypto close
-for BLOCKITEM_NUM in {1..$NUM_OF_STORAGE_ITEMS}; do
-    setCurrentBlockItem $BLOCKITEM_NUM
-    if [[ ${(L)_FSTYPE} == luks ]]; then
-        cryptsetup close $_LABEL || :
-    fi
-    unsetCurrentBlockItem
-done
 -----------------------------------------------------------------------
+# debugging crypto close
+for _record_index in {1..$NUM_STORAGE_RECORDS}; do
+    setActiveStorageRecordWithPrefix $_record_index _record
+    if [[ ${(L)_record_fstype} == luks ]]; then
+        cryptsetup close $_record_label &>/dev/null || :
+    fi
+    unsetActiveStorageRecordWithPrefix _record
+done
 
+# Erase drive, create new GPT structure, and create partitions
+storageGeneratePartitioningCommandForDrive _part_command $DRIVE
 eval "$_part_command"
 
 :<< \
@@ -220,11 +215,11 @@ if [[ $ENCRYPTION == true ]]; then
         print "Encrypting $_record_label on $_record_device_path ... "
             print -r "$PASSPHRASE" \
                 | cryptsetup ${LUKS_OPTIONS[FORMAT_OPTIONS]:-} \
-                  luksFormat $_record_path
+                  luksFormat $_record_device_path
             print -r "$PASSPHRASE" \
                 | cryptsetup open ${LUKS_OPTIONS[OPEN_OPTIONS]:-} \
                   ${SSD:-${LUKS_OPTIONS[OPEN_OPTIONS,SSD]:-}} \
-                  $_record_path $_record_label
+                  $_record_device_path $_record_label
         fi
         unsetActiveStorageRecordWithPrefix _record
     done
@@ -244,10 +239,16 @@ MAKE FILESYSTEMS
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     setActiveStorageRecordWithPrefix $_record_index _record
     if [[ ${(L)_record_fstype} != luks && -z ${_record_child_of:-} ]]; then
-        _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
-                                ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
-                                ${_record_mkfs_options:-})
-        eval mkfs.${(L)_record_fstype} $mkfs_options_compiled $_record_path
+        if [[ ${(L)_record_fstype} == swap  ]]; then
+            eval mkswap --label $_record_label $_record_path
+            eval swapon -L $_record_label
+        else
+            _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
+                                    ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
+                                    ${_record_mkfs_options:-})
+            eval mkfs.${(L)_record_fstype} $_mkfs_options_compiled \
+                                           $_record_device_path
+        fi
     fi
     unsetActiveStorageRecordWithPrefix _record
 done

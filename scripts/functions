@@ -132,7 +132,8 @@ assignToVarname=$1
 
 # Create list of drives
 # Remove mounted drives from list
-local drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+typeset -a drives
+drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
 print "FULL LIST OF DRIVES:"
 print -l "$drives"
 print
