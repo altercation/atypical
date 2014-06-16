@@ -289,12 +289,13 @@ setActiveStorageRecordWithPrefix () {
     typeset -ag $_var_list_name
     #${_prefix}_var_names
     # following gets all currently set field names for this record
-    _record_fields=(${STORAGE_RECORDS[(I)1,*]#1,})
+    _record_fields=(${STORAGE_RECORDS[(I)${_record_index},*]#${_record_index},})
     local _field_name
     for _field_name in $_record_fields; do
         _var_name="${_prefix}_${(L)_field_name}"
         typeset -g $_var_name
         eval $_var_list_name'=(${(P)_var_list_name} $_var_name)'
+        print "setting $_var_name"
         eval $_var_name'="$(getFieldFromRecordInTable \
                                $_field_name \
                                $_record_index \
