@@ -326,11 +326,14 @@ done
 
 # Mount
 for _mount_point in $MOUNT_POINTS; do
+print "\n------------------\nMOUNT POINT $_mount_point"
 
     _record_index=$(lookupRecordByFieldValue \
                     MOUNT_POINT "$_mount_point" STORAGE_RECORDS)
 
     setActiveStorageRecordWithPrefix $_record_index _record
+
+print "record MOUNT POINT $_record_mount_point"
 
     _mount_options_compiled=""
 
