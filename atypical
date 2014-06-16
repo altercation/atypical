@@ -240,7 +240,7 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     setActiveStorageRecordWithPrefix $_record_index _record
     if [[ ${(L)_record_fstype} != luks && -z ${_record_child_of:-} ]]; then
         if [[ ${(L)_record_fstype} == swap  ]]; then
-            eval mkswap --label $_record_label $_record_path
+            eval mkswap --label $_record_label $_record_device_path
             eval swapon -L $_record_label
         else
             _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
@@ -260,13 +260,13 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     if [[ ${(L)_record_fstype} != luks \
        && ${(L)_record_parent_fstype:-} == luks ]]; then
         if [[ ${(L)_record_fstype} == swap  ]]; then
-            eval mkswap --label $_record_label $_record_path
+            eval mkswap --label $_record_label $_record_device_path
             eval swapon -L $_record_label
         else
             _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
                                     ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
                                     ${_record_mkfs_options:-})
-            eval mkfs.${(L)_FSTYPE} $_mkfs_options_compiled ${_record_path}
+            eval mkfs.${(L)_FSTYPE} $_mkfs_options_compiled ${_record_device_path}
         fi
     fi
     unsetActiveStorageRecordWithPrefix _record
