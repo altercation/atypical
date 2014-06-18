@@ -1,0 +1,56 @@
+#!/usr/bin/zsh
+
+USAGE="$(cat << \
+'-----------------------------------------------------------------------'
+loadfile
+
+part of Atypical - A Typical Arch Linux Install Script
+Ethan Schoonover <es@ethanschoonover.com>
+
+
+Summary:
+loadfile filepath defaultpath [varname]
+
+Options:
+-o, --output  Output only, do not source and execute
+
+Details:
+Sources (and thus executes) the given file. If path is not absolute or
+a remote uri then prepend the default search path directory to it.
+
+Accepts local relative, local absolute, remote http, https and ftp URIs.
+-----------------------------------------------------------------------)"
+
+:<< \
+'-----------------------------------------------------------------------'
+ADDING CUSTOM MANIFEST ROOT
+-----------------------------------------------------------------------
+local _load_filepath
+
+:''<<< Checking for local or remote custom manifest root...
+ _load_filepath=$1
+_load_defaultpath="${2:-}"
+
+if [[ "$_load_filepath" =~ "(http|ftp)s?:.*" ]]; then
+    _temp_dir=$(mktemp -d)
+    _temp_filepath=$_temp_dir/loadfile
+    curl -sL $_load_filepath > $_temp_filepath || return 1
+    _load_filepath="$_temp_filepath"
+else [[ "${_load_filepath:0:1}" != "/" ]]
+    # create absolute path
+    _load_filepath="${_load_defaultpath%/}${_load_defaultpath:+/}${_load_filepath}"
+fi
+
+if [[ ! -f "$_load_filepath" ]]; then
+    print "Could not load file $_load_filepath"
+    return 1
+fi
+
+if [[ -z ${OPTION[OUTPUT]:-} ]]; then
+    . "$_load_filepath"
+else
+    cat "$_load_filepath"
+fi
+
+[[ -z "${_temp_dir:-}" ]] || rm -rf "$_temp_dir"
+

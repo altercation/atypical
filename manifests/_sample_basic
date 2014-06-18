@@ -1,0 +1,66 @@
+::<< \
+-----------------------------------------------------------------------
+SAMPLE MANIFEST
+-----------------------------------------------------------------------
+# Including a repo url in the MANFIEST[ROOT] value here will clone that
+# locally prior to installation. Any installers in it that match the
+# names in the system or user installer functions below will be sourced
+# from the repository files first. The custom respository does not need
+# to have all content, however, and any installer that is not found
+# in the custom repository will be sourced from the standard Atypical
+# functions directory.
+#
+# Example:
+# MANIFEST[ROOT]="https://github.com/altercation/atypical.git"
+#
+# You may also include a path to an existing local directory. This
+# must be the parent directory that contains the installers/user
+# subdirectories that you wish to source custom installers from.
+#
+# Leave this unassigned or empty to use the default Atypical scripts
+# only.
+
+MANIFEST[ROOT]=""
+
+STORAGE[SOURCE]=encrypt_btrfs_subvols
+STORAGE[DATA]=encrypt_btrfs_subvols
+
+::<< \
+-----------------------------------------------------------------------
+SYSTEM CONFIG VALUES
+-----------------------------------------------------------------------
+# General system config. Escape or quote all items with spaces.
+
+CONFIG[HOSTNAME]="lithograph
+CONFIG[TIMEZONE]=America/Los_Angeles
+CONFIG[LOCALE,GEN]=en_US.UTF-8\ UTF-8
+CONFIG[LOCALE,CONF]=en_US.UTF-8
+CONFIG[CONSOLEFONT]=Lat2-Terminus16
+CONFIG[USER,NAME]=es
+CONFIG[USER,SHELL]=zsh
+
+::<< \
+-----------------------------------------------------------------------
+SYSTEM INSTALLER FUNCTIONS
+-----------------------------------------------------------------------
+# Installers run as root. Quote or enclose in parens, all lists of
+# items. values may also be heredocs of blocks of code in lieu of an
+# installer filename.
+
+INSTALLER[VIDEO]=video_intel
+INSTALLER[CLI]=(cli_zsh cli_mutt cli_vim)
+INSTALLER[GUI]=gui_xmonad_xmobar
+INSTALLER[UTILS]=(utils_admin utils_file utils_mlocate utils_cron utils_disk utils_power)
+INSTALLER[APPS]=(apps_vm)
+INSTALLER[MISC]=()
+
+::<< \
+-----------------------------------------------------------------------
+USER INSTALLER FUNCTIONS
+-----------------------------------------------------------------------
+# Will be run as user set in CONFIG[USER,NAME]. Quote or enclose in 
+# parentheses, all lists of installers. Values may also be heredocs of
+# blocks of code in lieu of an installer filename.
+
+USER[BOOTSTRAP]="es-user-bootstrap"
+

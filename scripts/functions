@@ -40,9 +40,6 @@ detectMemory () {
 
 # General
 
-notifySection () { print "\n\n$@\n\n"; }
-notify () { print "\n$@\n"; }
-
 conformToArray () {
 # takes a global variable NAME as an argument, ensures that it is an
 # array, not a simple list (doesn't damage existing arrays)
@@ -378,4 +375,11 @@ _sgdisk_cmd=( sgdisk --zap-all "$_drive;"
               sgdisk --clear "$_drive;"
               sgdisk ${_sgdisk_cmd:-} "$_drive;")
 eval $1'="$_sgdisk_cmd"'
+}
+
+selectIfUnassigned () {
+:
+# if $1 is not set, or empty: 
+# a list of options will be presented if $3 contains a list of choices
+# otherwise a prompt ($2) will be displayed
 }
