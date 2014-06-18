@@ -23,7 +23,7 @@ atypical http://myserver.com/manifest
 -------------------------------------------------------------------------------
 )"
 
-:''<< \
+:<< \
 -------------------------------------------------------------------------------
 FRONTMATTER
 -------------------------------------------------------------------------------
@@ -31,70 +31,89 @@ FRONTMATTER
 [[ ${1:-} == *-dd* ]] && DDEBUG=true
 [[ ${1:-} == *-d* ]]  &&  DEBUG=true && shift
 
-# script options
-setopt NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB ${DEBUG:+VERBOSE} ${DDEBUG:+XTRACE}
+setopt ERR_RETURN NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB \
+       ${DEBUG:+VERBOSE} ${DDEBUG:+XTRACE}
 
-# initial housekeeping functions
-typeset -Ax SCRIPT FUNCTIONS DATA MANIFEST CONFIG INSTALLER USER
-typeset -ax STORAGE MODULES BOOTOPTS 
-MOUNTROOT="/mnt" __=${__:=${(r:80::--:):-}}
-SCRIPT[NAME]="${${_PATH:=$(readlink -f "$0")}:t}" SCRIPT[ROOT]="${_PATH:h}"
-TMPDIR="$(mktemp -d "/tmp/${SCRIPT[NAME]}-XXXXXX")"
-LOGFILE="/tmp/atypical.log"; rm /tmp/atypical.log &>/dev/null || true
-TRAPEXIT () { [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR"; }
-TRAPERR  () { teeLog "\nERROR (exiting)\nSee log file: ${LOGFILE}\n"; exit 1; }
-exitWith () { print "$@"; exit 0; }; failWith () { print "$@"; exit 1; }
-[[ -n ${MANIFEST[FILE]:=${1:-}} ]] || exitWith "\n$__\n$USAGE\n$__\n"
-
-:''<< \
+:<< \
 -------------------------------------------------------------------------------
-this is a little hack to allow semantic comments which write to the teeLog
+LOGGING FUNCTIONS
+
+Includes a little hack to allow semantic comments which write to the teeLog
 which, if this hack is not present, do not break the script. Additionally the
 alias does not damage the builtin : by using the '' suffix to limit scope to
 an otherwise unused name. Being global, autoloaded scripts can use the same
 format without or can be called directly from the command line without the
 alias defined here and still function as expected.
 -------------------------------------------------------------------------------
-alias -g :\'\'\"\"="errLog"; alias -g :\'\'="teeLog"; alias -g :\"\"="_teeLog"
-teeLog   () { _m=("${@:-$(while read line; do print $line; done)}");
-              print -- "${(@F)_m:-}" >> "$LOGFILE" | cat; }
-_teeLog  () { _m=("${@:-$(while read line; do print $line; done)}");
-              teeLog "\n$__\n${(F)_m}\n$__"; }
-errLog   () { _m=("${@:-$(while read line; do print $line; done)}");
-              print "${(@F)_m:-}\n\nERROR EXIT" >> "$LOGFILE" | cat; exit 1; }
+_Log () { x=$1; p="$2"; s="$3"; shift 3;
+          m=("${@:-$(while read line; do print $line; done)}");
+          print -- "$p${(@F)m:-}$s" >> "$LOGFILE" | cat; return $x }
 
-# scan and autoload functions
+alias -g teeLog='_Log 0 "" ""'
+alias -g  :\'\'='_Log 0 "" ""'
+
+alias -g hedLog='_Log 0 "\n$__\n" "\n$__\n"'
+alias -g  :\"\"='_Log 0 "\n$__\n" "\n$__\n"'
+
+alias -g errLog='_Log 1 "\n$___\nERROR!\n$__\n" "\n$___"'
+
+:<< \
+-------------------------------------------------------------------------------
+INITIAL DECLARATIONS & HOUSEKEEPING FUNCTIONS
+-------------------------------------------------------------------------------
+typeset -Ax SCRIPT SOURCE DATA MANIFEST CONFIG INSTALLER USER
+typeset -ax STORAGE MODULES BOOTOPTS 
+
+SCRIPT[NAME]="${${_PATH:=$(readlink -f "$0")}:t}" SCRIPT[ROOT]="${_PATH:h}"
+
+MOUNTROOT="/mnt" __=${__:=${(r:80::--:):-}}; ___=${__//?/=}
+TMPDIR="$(mktemp -d "/tmp/${SCRIPT[NAME]}-XXXXXX")"
+LOGFILE="/tmp/atypical.log"; rm /tmp/atypical.log &>/dev/null || true
+
+TRAPEXIT () { [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR"; }
+TRAPERR  () { teeLog "\nERROR - see log file: ${LOGFILE}\n"; exit 1; }
+exitWith () { print "$@"; exit 0; }; failWith () { print "$@"; exit 1; }
+
 autoInit () { for _load_path; do fpath=("$_load_path" "${fpath[@]}");
-for _func in ${_load_path}/*; do autoload ${_func:t}; done; done; }
-FUNCTIONS[SCRIPTS_PATH]="${SCRIPT[ROOT]}/scripts"
-FUNCTIONS[INSTALLERS_PATH]="${SCRIPT[ROOT]}/installers"
-FUNCTIONS[USER_PATH]="${SCRIPT[ROOT]}/scripts"
-autoInit $FUNCTIONS
+for _func in ${_load_path}/**/*(#q.); do autoload ${_func:t}; done; done; }
+SOURCE[MANIFESTS]="${SCRIPT[ROOT]}/manifests"
+SOURCE[STORAGE]="${SCRIPT[ROOT]}/storage"
+SOURCE[INSTALLERS]="${SCRIPT[ROOT]}/installers"
+SOURCE[FUNCTIONS]="${SCRIPT[ROOT]}/functions"
+SOURCE[USER]="${SCRIPT[ROOT]}/user"
+autoInit "${SOURCE[INSTALLERS]}" "${SOURCE[FUNCTIONS]}" "${SOURCE[USER]}"
 
 :""<< \
 -------------------------------------------------------------------------------
-LOADING & PROCESSING MANIFEST
+LOADING & PROCESSING ATYPICAL MANIFEST
 -------------------------------------------------------------------------------
 
-loadFile "${MANIFEST[FILE]}" "${SCRIPT[ROOT]}/manifests" \
+[[ -n ${MANIFEST[FILE]:=${1:-}} ]] || exitWith "\n$__\n$USAGE\n$__\n"
+
+sourceFile "${MANIFEST[FILE]}" "${SCRIPT[ROOT]}/manifests" \
     && teeLog <<< "Loaded manifest successfully..." \
     || errLog <<< "Failure loading manifest..."
 
+exit
+
 if [[ -n "${MANIFEST[ROOT]:-}" ]]
 then
-    SCRIPT[CUSTOM_ROOT]="$(addScriptRoot "${MANIFEST[ROOT]}")"
-    FUNCTIONS[CUSTOM_SCRIPTS_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-    FUNCTIONS[CUSTOM_INSTALLERS_PATH]="${SCRIPT[CUSTOM_ROOT]}/installers"
-    FUNCTIONS[CUSTOM_USER_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-    autoInit $FUNCTIONS
+    if SCRIPT[CUSTOM_ROOT]="$(addScriptsRoot "${MANIFEST[ROOT]}")"; then
+        FUNCTIONS[CUSTOM_SCRIPTS_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
+        FUNCTIONS[CUSTOM_INSTALLERS_PATH]="${SCRIPT[CUSTOM_ROOT]}/installers"
+        FUNCTIONS[CUSTOM_USER_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
+        autoInit $FUNCTIONS
+    else
+        errLog "Failed to source/set new scripts root as listed in manifest."
+    fi
 fi
-
-exit
 
 :""<< \
 -------------------------------------------------------------------------------
 PREPARING STORAGE
 -------------------------------------------------------------------------------
+
+exit
 xxx
 at this point we might have either the full storage table data or a filename...
 atypical-storage "${CONFIG[STORAGE]}"

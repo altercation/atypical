@@ -1,0 +1,80 @@
+#!/usr/bin/zsh
+
+:<< \
+'-----------------------------------------------------------------------'
+notify
+
+part of Atypical - A Typical Arch Linux Install Script
+Ethan Schoonover <es@ethanschoonover.com>
+
+
+Summary:
+notify "message"
+
+Options:
+-h #    Output as heading
+
+
+Details:
+Sources (and thus executes) the given file. If path is not absolute or
+a remote uri then prepend the default search path directory to it.
+
+Accepts local relative, local absolute, remote http, https and ftp URIs.
+-----------------------------------------------------------------------
+
+:<< \
+'-----------------------------------------------------------------------'
+PROCESS OPTIONS
+-----------------------------------------------------------------------
+declare -A OPTION
+optspec=":o-:"
+while getopts "$optspec" optchar; do
+    if [[ "${optchar}" == "-" ]]; then
+            case "${OPTARG}" in
+                output|help) optchar=${OPTARG:0:1} ;;
+                *) [ "$OPTERR" = 1 ] && [ "${optspec:0:1}" != ":" ] && echo "Unknown option --${OPTARG}" >&2 && exit 1;;
+            esac
+    fi
+    case "${optchar}" in
+        o) OPTION[OUTPUT]=true ;;
+        h) print "${USAGE:-}"; exit 2 ;;
+        *)
+            if [ "$OPTERR" != 1 ] || [ "${optspec:0:1}" = ":" ]; then
+                print "Non-option argument: '-${OPTARG}'" >&2; exit 1;
+            fi
+            ;;
+    esac
+done
+shift $((OPTIND-1)) # start where getopts left off
+
+:<< \
+'-----------------------------------------------------------------------'
+LOAD AND SOURCE OR OUTPUT
+-----------------------------------------------------------------------
+local _load_filepath
+_load_filepath=$1
+_load_defaultpath="${2:-}"
+
+if [[ "$_load_filepath" =~ "(http|ftp)s?:.*" ]]; then
+    _temp_dir=$(mktemp -d)
+    _temp_filepath=$_temp_dir/loadfile
+    curl -sL $_load_filepath > $_temp_filepath || return 1
+    _load_filepath="$_temp_filepath"
+else [[ "${_load_filepath:0:1}" != "/" ]]
+    # create absolute path
+    _load_filepath="${_load_defaultpath%/}${_load_defaultpath:+/}${_load_filepath}"
+fi
+
+if [[ ! -f "$_load_filepath" ]]; then
+    print "Could not load file $_load_filepath"
+    return 1
+fi
+
+if [[ -z ${OPTION[OUTPUT]:-} ]]; then
+    . "$_load_filepath"
+else
+    cat "$_load_filepath"
+fi
+
+[[ -z "${_temp_dir:-}" ]] || rm -rf "$_temp_dir"
+return 1
