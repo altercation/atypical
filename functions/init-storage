@@ -39,7 +39,7 @@ FRONTMATTER
 -----------------------------------------------------------------------
 
 # script options
-setopt ERR_EXIT NO_UNSET EXTENDED_GLOB #VERBOSE XTRACE
+setopt ERR_RETURN NO_UNSET EXTENDED_GLOB #VERBOSE XTRACE
 
 # declaration
 typeset -Ag CONFIG INSTALLER \

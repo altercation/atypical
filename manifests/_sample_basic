@@ -2,7 +2,7 @@
 -----------------------------------------------------------------------
 SAMPLE MANIFEST
 -----------------------------------------------------------------------
-# Including a repo url in the MANFIEST[ROOT] value here will clone that
+# Including a repo url in the SCRIPT[CUSTOM_ROOT] value here will clone
 # locally prior to installation. Any installers in it that match the
 # names in the system or user installer functions below will be sourced
 # from the repository files first. The custom respository does not need
@@ -11,7 +11,7 @@ SAMPLE MANIFEST
 # functions directory.
 #
 # Example:
-# MANIFEST[ROOT]="https://github.com/altercation/atypical.git"
+# SCRIPT[CUSTOM_ROOT]="https://github.com/altercation/atypical.git"
 #
 # You may also include a path to an existing local directory. This
 # must be the parent directory that contains the installers/user
@@ -20,10 +20,31 @@ SAMPLE MANIFEST
 # Leave this unassigned or empty to use the default Atypical scripts
 # only.
 
-MANIFEST[ROOT]=""
+SCRIPT[CUSTOM_ROOT]=""
 
-STORAGE[SOURCE]=encrypt_btrfs_subvols
-STORAGE[DATA]=encrypt_btrfs_subvols
+# The STORAGE[TABLE] value can be either a filename or the actual
+# table data (identical in format to the file content, so a heredoc
+# or just enclosing in parens is probably the easiest way to include it).
+#
+# Examples:
+#
+# STORAGE[TABLE]=encrypt_btrfs_subvols
+#
+# STORAGE[TABLE]="
+# ==========================================================================
+# SIZE   CODE   LABEL       CHILD_OF    FSTYPE   MOUNT_POINT   MOUNT_OPTIONS
+# --------------------------------------------------------------------------
+# 512M   ef00   EFI         -           fat      /boot         -
+# RAM    8300   cryptswap   -           luks     -             -
+# max    8300   cryptsys    -           luks     -             -
+# -      -      swap        cryptswap   swap     -             -
+# -      -      system      cryptsys    btrfs    -             -
+# -      -      root        system      btrfs    /             -
+# -      -      home        system      btrfs    /home         -
+# ==========================================================================
+# "
+
+STORAGE[TABLE]="encrypt_btrfs_subvols"
 
 ::<< \
 -----------------------------------------------------------------------
@@ -48,7 +69,7 @@ SYSTEM INSTALLER FUNCTIONS
 # installer filename.
 
 INSTALLER[VIDEO]=video_intel
-INSTALLER[CLI]=(cli_zsh cli_mutt cli_vim)
+INSTALLER[CLI]="cli_zsh; cli_mutt cli_vim"
 INSTALLER[GUI]=gui_xmonad_xmobar
 INSTALLER[UTILS]=(utils_admin utils_file utils_mlocate utils_cron utils_disk utils_power)
 INSTALLER[APPS]=(apps_vm)

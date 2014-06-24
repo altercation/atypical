@@ -60,7 +60,7 @@ if [[ "$_load_filepath" =~ "(http|ftp)s?:.*" ]]; then
     _temp_filepath=$_temp_dir/loadfile
     curl -sL $_load_filepath > $_temp_filepath || return 1
     _load_filepath="$_temp_filepath"
-else [[ "${_load_filepath:0:1}" != "/" ]]
+elif [[ "${_load_filepath:0:1}" != "/" ]]; then
     # create absolute path
     _load_filepath="${_load_defaultpath%/}${_load_defaultpath:+/}${_load_filepath}"
 fi

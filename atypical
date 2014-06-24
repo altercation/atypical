@@ -1,7 +1,8 @@
 #!/usr/bin/zsh
 
-USAGE="$(cat << \
+usage () {<< \
 -------------------------------------------------------------------------------
+
 atypical
 
 part of Atypical - A Typical Arch Linux Install Script
@@ -13,110 +14,234 @@ atypical manifest-filename
 atypical /full/absolute/path/to/manifest-filename
 atypical http://url/of/file/to/curl
 
+Options:
+
+-d, --debug     Debug level 1: show extra command output
+-dd, --ddebug   Debug level 2: add verbose script execution option
+-ddd, --dddebug Debug level 3: add xtrace script execution option
+
 Examples:
 
-atypical es_thinkpad_x220 # for a specific user, laptop
-atypical /root/atypical/manifests/es_thinkpad_x220
-atypical http://myserver.com/manifest
+atypical gnome_system
+atypical xmonad_laptop
+atypical /root/atypical/manifests/quick_modified_gnome_system
+atypical http://myserver.com/my_laptop_manifest
 
 (see manifest subdirectory for manifest file content details)
+
 -------------------------------------------------------------------------------
-)"
+exit ${1:-0}; }
 
 :<< \
 -------------------------------------------------------------------------------
-FRONTMATTER
+Frontmatter
 -------------------------------------------------------------------------------
-# -d, --debug, -dd --debug
-[[ ${1:-} == *-dd* ]] && DDEBUG=true
-[[ ${1:-} == *-d* ]]  &&  DEBUG=true && shift
+# simple opt parsing since we only use debug flags
+# -d, --debug, -dd, --ddebug, -ddd, --dddebug
+[[ ${1:-} == *-ddd* ]] && DDDEBUG=true
+[[ ${1:-} == *-dd* ]]  && DDEBUG=true
+[[ ${1:-} == *-d* ]]   && DEBUG=true && shift
 
+# script options: good habits like no_unset and ensuring we fail out if
+# there are any errors... error handling must be present where "acceptable"
+# error states are anticipated
 setopt ERR_RETURN NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB \
-       ${DEBUG:+VERBOSE} ${DDEBUG:+XTRACE}
+       ${DDEBUG:+VERBOSE} ${DDDEBUG:+XTRACE}
 
 :<< \
 -------------------------------------------------------------------------------
-LOGGING FUNCTIONS
-
-Includes a little hack to allow semantic comments which write to the teeLog
-which, if this hack is not present, do not break the script. Additionally the
-alias does not damage the builtin : by using the '' suffix to limit scope to
-an otherwise unused name. Being global, autoloaded scripts can use the same
-format without or can be called directly from the command line without the
-alias defined here and still function as expected.
+Logging functions
 -------------------------------------------------------------------------------
-_Log () { x=$1; p="$2"; s="$3"; shift 3;
-          m=("${@:-$(while read line; do print $line; done)}");
-          print -- "$p${(@F)m:-}$s" >> "$LOGFILE" | cat; return $x }
+# set up log file and fd
+rm "${LOGFILE:=/tmp/atypical.log}" &>/dev/null || true
+integer LOGFD; exec {LOGFD} >> "${LOGFILE}"
 
-alias -g teeLog='_Log 0 "" ""'
-alias -g  :\'\'='_Log 0 "" ""'
+# teeLog: tee like logging. Examples:
+#     teeLog "message"
+#     teeLog -w "wrapped message"
+#     print "message" | teeLog
+#     teeLog <<< "message" 
+#     teeLog -w <<EOF
+#     "wrapped message" 
+#     EOF
+teeLog () { [[ "${1:-}" == "-w" ]] && w="${(r:80::--:):-}" && shift || w=""
+    m=("${@:-$(while read line; do print $line; done)}");
+    print -- "${w:-}${w:+\n}${(@F)m:-}${w:+\n}${w:-}" >&1 >&$LOGFD 2>&1;}
 
-alias -g hedLog='_Log 0 "\n$__\n" "\n$__\n"'
-alias -g  :\"\"='_Log 0 "\n$__\n" "\n$__\n"'
+# semantic comments:
+# Without these aliases, the semantic comment style is ignored silently
+# as "just a comment". With these aliases, the semantic comment content
+# is output to the console and logged.
+alias -g  :\'\'='teeLog'
+alias -g  :\"\"='teeLog -w'
 
-alias -g errLog='_Log 1 "\n$___\nERROR!\n$__\n" "\n$___"'
+# ioLog* is used herein to allow stderr messages to be captured and also
+# allow errors to be handled by ERR_RETURN, TRAPERR/TRAPZERR. Examples:
+#
+#     (print "this will succeed"; this_will_fail ) ioLogOutErr
+#         will allow both stdout and stderr messages out to console
+#         and also log them to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+#
+#     (print "this will succeed"; this_will_fail ) ioLogOut
+#         will allow only stdout to console but will still log both
+#         stdout and stderr to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+#
+#     (print "this will succeed"; this_will_fail ) ioLogNull
+#         will allow neither stdout nor stderr out to the console but
+#         will log both to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+alias ioLogOutErr=">&1 >&$LOGFD 2>&1"
+alias ioLogOut=">&1 >&$LOGFD 2>&$LOGFD"
+alias ioLogNull=">&$LOGFD 2>&$LOGFD"
+[[ -n ${DEBUG:-} ]] && \
+alias ioLogOut=">&1 >&$LOGFD 2>&1" && \
+alias ioLogNull=">&1 >&$LOGFD 2>&1"
 
-:<< \
+:''<< \
 -------------------------------------------------------------------------------
-INITIAL DECLARATIONS & HOUSEKEEPING FUNCTIONS
+Setting up installer, beginning installation...
 -------------------------------------------------------------------------------
-typeset -Ax SCRIPT SOURCE DATA MANIFEST CONFIG INSTALLER USER
-typeset -ax STORAGE MODULES BOOTOPTS 
+# initial declarations
+typeset -Ax SCRIPT DATAPATHS AUTOPATHS MANIFEST CONFIG INSTALLER USER STORAGE
 
+# make sure we know where the real script (and subdirectories) are
 SCRIPT[NAME]="${${_PATH:=$(readlink -f "$0")}:t}" SCRIPT[ROOT]="${_PATH:h}"
 
-MOUNTROOT="/mnt" __=${__:=${(r:80::--:):-}}; ___=${__//?/=}
+# default values for new system mount point, temp files
+MOUNTROOT="/mnt"
 TMPDIR="$(mktemp -d "/tmp/${SCRIPT[NAME]}-XXXXXX")"
-LOGFILE="/tmp/atypical.log"; rm /tmp/atypical.log &>/dev/null || true
 
-TRAPEXIT () { [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR"; }
-TRAPERR  () { teeLog "\nERROR - see log file: ${LOGFILE}\n"; exit 1; }
-exitWith () { print "$@"; exit 0; }; failWith () { print "$@"; exit 1; }
+# zsh trap functions
+cleanup  () { [[ -n $LOGFD ]] && exec {LOGFD}>&- && unset $LOGFD;
+              [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR"; }
 
-autoInit () { for _load_path; do fpath=("$_load_path" "${fpath[@]}");
-for _func in ${_load_path}/**/*(#q.); do autoload ${_func:t}; done; done; }
-SOURCE[MANIFESTS]="${SCRIPT[ROOT]}/manifests"
-SOURCE[STORAGE]="${SCRIPT[ROOT]}/storage"
-SOURCE[INSTALLERS]="${SCRIPT[ROOT]}/installers"
-SOURCE[FUNCTIONS]="${SCRIPT[ROOT]}/functions"
-SOURCE[USER]="${SCRIPT[ROOT]}/user"
-autoInit "${SOURCE[INSTALLERS]}" "${SOURCE[FUNCTIONS]}" "${SOURCE[USER]}"
+# list trap to keep it from handling subshell exits
+trap ' print "\nEXITING INSTALLER"; cleanup;' EXIT
+
+# function trap to handle subshell errors
+TRAPZERR () { local _cmd=$_ _code=$?;
+              print "\nUNHANDLED ERROR in command $_cmd\n(see $LOGFILE)\n" \
+              2>&$LOGFD; cleanup; exit 1; }
+
+exitWith () { print "$@"; exit 0; }
+failWith () { print "\n${(U)@}"; exit 1; }
+
+# helper function to set up autoload functions by scanning directories
+autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
+    fpath=("$_newpath" "${fpath[@]}") _newfuncs=(${_newpath}/**/*(.))
+    for _func in "${(@)_newfuncs}"; do autoload ${_func:t}; done; done; }
+
+# our "data" directories (non executable file content)
+DATAPATHS[MANIFESTS]="${SCRIPT[ROOT]}/manifests"
+DATAPATHS[STORAGE]="${SCRIPT[ROOT]}/storage"
+
+# our initial built-in function directories
+AUTOPATHS[INSTALLERS]="${SCRIPT[ROOT]}/installers"
+AUTOPATHS[FUNCTIONS]="${SCRIPT[ROOT]}/functions"
+AUTOPATHS[USER]="${SCRIPT[ROOT]}/user"
+
+# all files in directories (and recursively scanned subdirectories) listed in
+# AUTOPATHS will be set as autoload functions
+autoInit "${(@)AUTOPATHS}"
 
 :""<< \
 -------------------------------------------------------------------------------
-LOADING & PROCESSING ATYPICAL MANIFEST
+Loading & processing atypical manifest file
 -------------------------------------------------------------------------------
+# If the manifest file hasn't been specified as arg 1 on the command line, fail
+if [[ -z ${MANIFEST[FILE]:=${1:-}} ]]; then
+    teeLog "MANIFEST FILE NOT SPECIFIED" && usage 1
+fi
 
-[[ -n ${MANIFEST[FILE]:=${1:-}} ]] || exitWith "\n$__\n$USAGE\n$__\n"
+# Make sure we can load the file. sourceFile will source local manifests
+# in the default manifests subdirectory of the atypical directory, or will
+# load any absolute path provided. Additionally, it will download a remote
+# manifest from a given URL.
+if sourceFile "${MANIFEST[FILE]}" "${SCRIPT[ROOT]}/manifests"; then
+    teeLog "Loaded manifest successfully..."
+else
+    teeLog "Failure loading manifest..."
+    return 1
+fi
 
-sourceFile "${MANIFEST[FILE]}" "${SCRIPT[ROOT]}/manifests" \
-    && teeLog <<< "Loaded manifest successfully..." \
-    || errLog <<< "Failure loading manifest..."
-
-exit
-
-if [[ -n "${MANIFEST[ROOT]:-}" ]]
-then
-    if SCRIPT[CUSTOM_ROOT]="$(addScriptsRoot "${MANIFEST[ROOT]}")"; then
-        FUNCTIONS[CUSTOM_SCRIPTS_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-        FUNCTIONS[CUSTOM_INSTALLERS_PATH]="${SCRIPT[CUSTOM_ROOT]}/installers"
-        FUNCTIONS[CUSTOM_USER_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-        autoInit $FUNCTIONS
+# If the manifest contains a SCRIPT[CUSTOM]="http://repo.url/goes/here" style
+# declaration, that url is used as a git repository "root". This is then
+# cloned locally.
+if [[ "${SCRIPT[CUSTOM_ROOT]:-}" =~ "(https?|git):.*" ]]; then
+    teeLog "Cloning custom script repository..."
+    (git clone --progress "${SCRIPT[CUSTOM_ROOT]}" "$TMPDIR/custom") ioLogNull
+    if (( $? == 0 )); then
+        SCRIPT[CUSTOM_ROOT]="$TMPDIR/custom"
+        teeLog "Successfully cloned custom script respository"
     else
-        errLog "Failed to source/set new scripts root as listed in manifest."
+        errLog "FAILED to clone custom script respository"
     fi
+fi
+
+# If a custom root has been set in the manifest and successfully cloned, its
+# subdirectories are scanned and all files added as autoload functions that
+# take precedence over built-in autoloaded functions. thus any atypical
+# function or installer can (and will) be overridden by a user file of the
+# same name.
+if [[ "${${SCRIPT[CUSTOM_ROOT]:-}:0:1}" == "/" ]]; then
+    DATAPATHS[CUSTOM_MANIFESTS]="${SCRIPT[CUSTOM_ROOT]}/manifests"
+    DATAPATHS[CUSTOM_STORAGE]="${SCRIPT[CUSTOM_ROOT]}/storage"
+    AUTOPATHS[CUSTOM_FUNCTIONS]="${SCRIPT[CUSTOM_ROOT]}/scripts"
+    AUTOPATHS[CUSTOM_INSTALLERS_PATH]="${SCRIPT[CUSTOM_ROOT]}/installers"
+    AUTOPATHS[CUSTOM_USER_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
+    autoInit "${(@v)AUTOPATHS[(I)CUSTOM*]}" "${SCRIPT[CUSTOM_ROOT]}"
+    teeLog "Successfully set custom script source as listed in manifest."
+elif [[ -n "${SCRIPT[CUSTOM_ROOT]:-}" ]]; then
+    errLog "Failed to source/set new script source as listed in manifest."
 fi
 
 :""<< \
 -------------------------------------------------------------------------------
-PREPARING STORAGE
+Preparing storage
 -------------------------------------------------------------------------------
+# expects STORAGE[TABLE] as scalar value, either filename or actual table data
+# check that we have something in the STORAGE[TABLE] value and if we do then
+# convert to array for easy multiline check
+if [[ -n "${STORAGE[TABLE]:-}" ]]; then
+    STORAGE_TABLE_DATA=(${(f)STORAGE[TABLE]:-})
+else
+    failWith "No storage table data / filename present in manifest."
+fi
 
+# single line value, assume is filename for storage table; check & read
+if [[ -z "${STORAGE_TABLE_DATA[2]:-}" ]]; then
+
+    # set up file path for custom storage
+    STORAGE_FILE="${DATAPATHS[CUSTOM_STORAGE]:-}/${STORAGE_TABLE_DATA}"
+
+    # if missing, then fallback to built in
+    [[ -f "${STORAGE_FILE}" ]] \
+    || STORAGE_FILE="${DATAPATHS[STORAGE]}/${STORAGE_TABLE_DATA}"
+
+    # if still missing, we have a problem with a missing file or bad filename
+    [[ -f "${STORAGE_FILE}" ]] \
+    || failWith "Storage table file not found at $STORAGE_FILE"
+
+    # write file contents to value, stripping comment lines
+    egrep -v "^#|^$" "${STORAGE_FILE}" > $TMPDIR/STORAGE_TABLE \
+    || failWith "Failed to read storage file $STORAGE_FILE"
+
+    # if we successfully processed, read it into the correct scalar variable
+    STORAGE[TABLE]="$(cat $TMPDIR/STORAGE_TABLE)"
+
+    # cleanup
+    rm $TMPDIR/STORAGE_TABLE &>/dev/null
+
+fi
+
+# call atypical's init-storage with whatever the current value is
+# (init-storage takes either a file path or table data, but we've normalized
+# to table data here)
+init-storage "${STORAGE[TABLE]}"
+print "in script"
 exit
-xxx
-at this point we might have either the full storage table data or a filename...
-atypical-storage "${CONFIG[STORAGE]}"
 
 :""<< \
 -------------------------------------------------------------------------------
