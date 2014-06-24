@@ -36,68 +36,13 @@ exit ${1:-0}; }
 -------------------------------------------------------------------------------
 Frontmatter
 -------------------------------------------------------------------------------
-# simple opt parsing since we only use debug flags
-# -d, --debug, -dd, --ddebug, -ddd, --dddebug
-[[ ${1:-} == *-ddd* ]] && DDDEBUG=true
-[[ ${1:-} == *-dd* ]]  && DDEBUG=true
-[[ ${1:-} == *-d* ]]   && DEBUG=true && shift
+# script absolute path, name, and load of common script env, opts, functions
 
-# script options: good habits like no_unset and ensuring we fail out if
-# there are any errors... error handling must be present where "acceptable"
-# error states are anticipated
-setopt ERR_RETURN NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB \
-       ${DDEBUG:+VERBOSE} ${DDDEBUG:+XTRACE}
+SCRIPTNAME="${${SCRIPTPATH:=$(readlink -f $0)}:t}" SCRIPTROOT="${SCRIPTPATH:h}"
 
-:<< \
--------------------------------------------------------------------------------
-Logging functions
--------------------------------------------------------------------------------
-# set up log file and fd
-rm "${LOGFILE:=/tmp/atypical.log}" &>/dev/null || true
-integer LOGFD; exec {LOGFD} >> "${LOGFILE}"
-
-# teeLog: tee like logging. Examples:
-#     teeLog "message"
-#     teeLog -w "wrapped message"
-#     print "message" | teeLog
-#     teeLog <<< "message" 
-#     teeLog -w <<EOF
-#     "wrapped message" 
-#     EOF
-teeLog () { [[ "${1:-}" == "-w" ]] && w="${(r:80::--:):-}" && shift || w=""
-    m=("${@:-$(while read line; do print $line; done)}");
-    print -- "${w:-}${w:+\n}${(@F)m:-}${w:+\n}${w:-}" >&1 >&$LOGFD 2>&1;}
-
-# semantic comments:
-# Without these aliases, the semantic comment style is ignored silently
-# as "just a comment". With these aliases, the semantic comment content
-# is output to the console and logged.
-alias -g  :\'\'='teeLog'
-alias -g  :\"\"='teeLog -w'
-
-# ioLog* is used herein to allow stderr messages to be captured and also
-# allow errors to be handled by ERR_RETURN, TRAPERR/TRAPZERR. Examples:
-#
-#     (print "this will succeed"; this_will_fail ) ioLogOutErr
-#         will allow both stdout and stderr messages out to console
-#         and also log them to the logfile; the error will be handled
-#         normally by the script (ignored, exited, trapped, etc.)
-#
-#     (print "this will succeed"; this_will_fail ) ioLogOut
-#         will allow only stdout to console but will still log both
-#         stdout and stderr to the logfile; the error will be handled
-#         normally by the script (ignored, exited, trapped, etc.)
-#
-#     (print "this will succeed"; this_will_fail ) ioLogNull
-#         will allow neither stdout nor stderr out to the console but
-#         will log both to the logfile; the error will be handled
-#         normally by the script (ignored, exited, trapped, etc.)
-alias ioLogOutErr=">&1 >&$LOGFD 2>&1"
-alias ioLogOut=">&1 >&$LOGFD 2>&$LOGFD"
-alias ioLogNull=">&$LOGFD 2>&$LOGFD"
-[[ -n ${DEBUG:-} ]] && \
-alias ioLogOut=">&1 >&$LOGFD 2>&1" && \
-alias ioLogNull=">&1 >&$LOGFD 2>&1"
+[[ ! -d "${COMMON::=${(q)SCRIPTROOT}/common}" ]] \
+    && { print "\nERROR: no common directory! Exiting.\n"; exit 1; } \
+    || for _common in ${COMMON:-}/*; do source ${_common}; done
 
 :''<< \
 -------------------------------------------------------------------------------
@@ -106,27 +51,8 @@ Setting up installer, beginning installation...
 # initial declarations
 typeset -Ax SCRIPT DATAPATHS AUTOPATHS MANIFEST CONFIG INSTALLER USER STORAGE
 
-# make sure we know where the real script (and subdirectories) are
-SCRIPT[NAME]="${${_PATH:=$(readlink -f "$0")}:t}" SCRIPT[ROOT]="${_PATH:h}"
-
 # default values for new system mount point, temp files
 MOUNTROOT="/mnt"
-TMPDIR="$(mktemp -d "/tmp/${SCRIPT[NAME]}-XXXXXX")"
-
-# zsh trap functions
-cleanup  () { [[ -n $LOGFD ]] && exec {LOGFD}>&- && unset $LOGFD;
-              [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR"; }
-
-# list trap to keep it from handling subshell exits
-trap ' print "\nEXITING INSTALLER"; cleanup;' EXIT
-
-# function trap to handle subshell errors
-TRAPZERR () { local _cmd=$_ _code=$?;
-              print "\nUNHANDLED ERROR in command $_cmd\n(see $LOGFILE)\n" \
-              2>&$LOGFD; cleanup; exit 1; }
-
-exitWith () { print "$@"; exit 0; }
-failWith () { print "\n${(U)@}"; exit 1; }
 
 # helper function to set up autoload functions by scanning directories
 autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
@@ -134,13 +60,13 @@ autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
     for _func in "${(@)_newfuncs}"; do autoload ${_func:t}; done; done; }
 
 # our "data" directories (non executable file content)
-DATAPATHS[MANIFESTS]="${SCRIPT[ROOT]}/manifests"
-DATAPATHS[STORAGE]="${SCRIPT[ROOT]}/storage"
+DATAPATHS[MANIFESTS]="${SCRIPTROOT}/manifests"
+DATAPATHS[STORAGE]="${SCRIPTROOT}/storage"
 
 # our initial built-in function directories
-AUTOPATHS[INSTALLERS]="${SCRIPT[ROOT]}/installers"
-AUTOPATHS[FUNCTIONS]="${SCRIPT[ROOT]}/functions"
-AUTOPATHS[USER]="${SCRIPT[ROOT]}/user"
+AUTOPATHS[INSTALLERS]="${SCRIPTROOT}/installers"
+AUTOPATHS[FUNCTIONS]="${SCRIPTROOT}/functions"
+AUTOPATHS[USER]="${SCRIPTROOT}/user"
 
 # all files in directories (and recursively scanned subdirectories) listed in
 # AUTOPATHS will be set as autoload functions
@@ -159,7 +85,7 @@ fi
 # in the default manifests subdirectory of the atypical directory, or will
 # load any absolute path provided. Additionally, it will download a remote
 # manifest from a given URL.
-if sourceFile "${MANIFEST[FILE]}" "${SCRIPT[ROOT]}/manifests"; then
+if sourceFile "${MANIFEST[FILE]}" "${SCRIPTROOT}/manifests"; then
     teeLog "Loaded manifest successfully..."
 else
     teeLog "Failure loading manifest..."
@@ -269,24 +195,24 @@ CREATE CHROOT SCRIPT; CHROOT, COMPLETION, CLEANUP
 # extract everything after this section with necessary variables prefixed
 
 # initialize new script
-CHROOT_SCRIPT_NAME=atypical-chroot
-CHROOT_SCRIPT_PATH="$MOUNT_ROOT/$CHROOT_SCRIPT_NAME"
-echo "#!/usr/bin/zsh" >> "$CHROOT_SCRIPT_PATH"
+CHROOT_SCRIPTNAME="${SCRIPTNAME}-chroot"
+CHROOT_SCRIPTPATH="$MOUNT_ROOT/$CHROOT_SCRIPTNAME"
+echo "#!/usr/bin/zsh" >> "$CHROOT_SCRIPTPATH"
 
 # dump required variables and arrays into new script
 function {
 for _param
 do
-    typeset -p $_param >> "$CHROOT_SCRIPT_PATH"
+    typeset -p $_param >> "$CHROOT_SCRIPTPATH"
 done
 } INSTALL CONFIG MKFS_OPTIONS MOUNT_OPTIONS LUKS_OPTIONS STORAGE_RECORDS
 
 # dump functions into script
-cat ${SCRIPT_PATH}/scripts/functions >> "$CHROOT_SCRIPT_PATH"
+cat ${SCRIPTROOT}/scripts/functions >> "$CHROOT_SCRIPTPATH"
 
 # dump remainder of file into chroot script
-sed -n "/>\{10\}/,$ p" "$SCRIPT_PATH" >> "$CHROOT_SCRIPT_PATH"
-chmod +x "$CHROOT_SCRIPT_PATH"
+sed -n "/>\{10\}/,$ p" "$SCRIPTPATH" >> "$CHROOT_SCRIPTPATH"
+chmod +x "$CHROOT_SCRIPTPATH"
 
 #DEBUG
 print "CHECK CHROOT SCRIPT"
@@ -384,3 +310,5 @@ POST USER LOGIN INSTALLS
 EXIT CHROOT FOR CLEANUP
 -------------------------------------------------------------------------------
 exit
+
+# vim: set filetype=sh :

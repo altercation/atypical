@@ -1,0 +1,57 @@
+:<< \
+-------------------------------------------------------------------------------
+Logging functions
+-------------------------------------------------------------------------------
+# Set up log file and fd. This is a standard format used throughout atypical
+# and thus we check to see if LOGFD has already been defined, skipping if so.
+# This allows autoload function scripts to also act as stand alone scripts with
+# their own independent logging if called directly from the command line.
+(( LOGFD )) || { rm -f "${LOGFILE:=/tmp/$SCRIPTNAME}.log"; } always
+               { integer LOGFD; exec {LOGFD} >> "${LOGFILE}"; }
+
+# teeLog: tee like logging. Examples:
+#     teeLog "message"
+#     teeLog -w "wrapped message"
+#     print "message" | teeLog
+#     teeLog <<< "message" 
+#     teeLog -w <<EOF
+#     "wrapped message" 
+#     EOF
+functions teeLog &>/dev/null ||
+teeLog () { [[ "${1:-}" == "-w" ]] && w="${(r:80::--:):-}" && shift || w=""
+    m=("${@:-$(while read line; do print $line; done)}");
+    print -- "${w:-}${w:+\n}${(@F)m:-}${w:+\n}${w:-}" >&1 >&$LOGFD 2>&1;}
+
+# semantic comments:
+# Without these aliases, the semantic comment style is ignored silently
+# as "just a comment". With these aliases, the semantic comment content
+# is output to the console and logged.
+alias -g  :\'\'='teeLog'
+alias -g  :\"\"='teeLog -w'
+
+# ioLog* is used herein to allow stderr messages to be captured and also
+# allow errors to be handled by ERR_RETURN, TRAPERR/TRAPZERR. Examples:
+#
+#     (print "this will succeed"; this_will_fail ) ioLogOutErr
+#         will allow both stdout and stderr messages out to console
+#         and also log them to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+#
+#     (print "this will succeed"; this_will_fail ) ioLogOut
+#         will allow only stdout to console but will still log both
+#         stdout and stderr to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+#
+#     (print "this will succeed"; this_will_fail ) ioLogNull
+#         will allow neither stdout nor stderr out to the console but
+#         will log both to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+alias ioLogOutErr=">&1 >&$LOGFD 2>&1"
+alias ioLogOut=">&1 >&$LOGFD 2>&$LOGFD"
+alias ioLogNull=">&$LOGFD 2>&$LOGFD"
+[[ -n ${DEBUG:-} ]] && \
+alias ioLogOut=">&1 >&$LOGFD 2>&1" && \
+alias ioLogNull=">&1 >&$LOGFD 2>&1"
+# utility functions
+exitWith () { print "$@"; exit 0; }
+failWith () { print "\n${(U)@}"; exit 1; }

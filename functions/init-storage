@@ -1,7 +1,8 @@
 #!/usr/bin/zsh
 
-:<< \
+usage () {<< \
 -----------------------------------------------------------------------
+
 init-storage
 
 part of Atypical - A Typical Arch Linux Install Script
@@ -22,18 +23,138 @@ init-storage http://myserver.com/storage
 init-storage can also take the actual table data in lieu of a filename
 as the argument:
 
-init-storage (
+init-storage "
 ==========================================================================
 SIZE   CODE   LABEL       CHILD_OF    FSTYPE   MOUNT_POINT   MOUNT_OPTIONS
 --------------------------------------------------------------------------
 -      -      root        -           btrfs    /             -
 ==========================================================================
-)
+"
 
 (see storage subdirectory of the atypical git respository)
+
 -----------------------------------------------------------------------
+exit ${1:-0}; }
+
 
 :<< \
+-------------------------------------------------------------------------------
+Frontmatter
+-------------------------------------------------------------------------------
+# simple opt parsing since we only use debug flags
+# -d, --debug, -dd, --ddebug, -ddd, --dddebug
+[[ ${1:-} == *-ddd* ]] && DDDEBUG=true
+[[ ${1:-} == *-dd* ]]  && DDEBUG=true
+[[ ${1:-} == *-d* ]]   && DEBUG=true && shift
+
+# script options: good habits like no_unset and ensuring we fail out if
+# there are any errors... error handling must be present where "acceptable"
+# error states are anticipated
+setopt ERR_RETURN NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB \
+       ${DDEBUG:+VERBOSE} ${DDDEBUG:+XTRACE}
+
+:<< \
+-------------------------------------------------------------------------------
+Logging functions
+-------------------------------------------------------------------------------
+
+# set up log file and fd
+rm "${LOGFILE:=/tmp/init-storage.log}" &>/dev/null || true
+integer LOGFD; exec {LOGFD} >> "${LOGFILE}"
+
+# teeLog: tee like logging. Examples:
+#     teeLog "message"
+#     teeLog -w "wrapped message"
+#     print "message" | teeLog
+#     teeLog <<< "message" 
+#     teeLog -w <<EOF
+#     "wrapped message" 
+#     EOF
+
+teeLog () { [[ "${1:-}" == "-w" ]] && w="${(r:80::--:):-}" && shift || w=""
+    m=("${@:-$(while read line; do print $line; done)}");
+    print -- "${w:-}${w:+\n}${(@F)m:-}${w:+\n}${w:-}" >&1 >&$LOGFD 2>&1;}
+
+# semantic comments:
+# Without these aliases, the semantic comment style is ignored silently
+# as "just a comment". With these aliases, the semantic comment content
+# is output to the console and logged.
+alias -g  :\'\'='teeLog'
+alias -g  :\"\"='teeLog -w'
+
+# ioLog* is used herein to allow stderr messages to be captured and also
+# allow errors to be handled by ERR_RETURN, TRAPERR/TRAPZERR. Examples:
+#
+#     (print "this will succeed"; this_will_fail ) ioLogOutErr
+#         will allow both stdout and stderr messages out to console
+#         and also log them to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+#
+#     (print "this will succeed"; this_will_fail ) ioLogOut
+#         will allow only stdout to console but will still log both
+#         stdout and stderr to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+#
+#     (print "this will succeed"; this_will_fail ) ioLogNull
+#         will allow neither stdout nor stderr out to the console but
+#         will log both to the logfile; the error will be handled
+#         normally by the script (ignored, exited, trapped, etc.)
+alias ioLogOutErr=">&1 >&$LOGFD 2>&1"
+alias ioLogOut=">&1 >&$LOGFD 2>&$LOGFD"
+alias ioLogNull=">&$LOGFD 2>&$LOGFD"
+[[ -n ${DEBUG:-} ]] && \
+alias ioLogOut=">&1 >&$LOGFD 2>&1" && \
+alias ioLogNull=">&1 >&$LOGFD 2>&1"
+
+:''<< \
+-------------------------------------------------------------------------------
+Setting up installer, beginning installation...
+-------------------------------------------------------------------------------
+# initial declarations
+typeset -Ax SCRIPT DATAPATHS AUTOPATHS MANIFEST CONFIG INSTALLER USER STORAGE
+
+# make sure we know where the real script (and subdirectories) are
+SCRIPT[NAME]="${${_PATH:=$(readlink -f "$0")}:t}" SCRIPT[ROOT]="${_PATH:h}"
+
+# default values for new system mount point, temp files
+MOUNTROOT="/mnt"
+TMPDIR="$(mktemp -d "/tmp/${SCRIPT[NAME]}-XXXXXX")"
+
+# zsh trap functions
+cleanup  () { [[ -n $LOGFD ]] && exec {LOGFD}>&- && unset $LOGFD;
+              [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR"; }
+
+# list trap to keep it from handling subshell exits
+trap ' print "\nEXITING INSTALLER"; cleanup;' EXIT
+
+# function trap to handle subshell errors
+TRAPZERR () { local _cmd=$_ _code=$?;
+              print "\nUNHANDLED ERROR in command $_cmd\n(see $LOGFILE)\n" \
+              2>&$LOGFD; cleanup; exit 1; }
+
+exitWith () { print "$@"; exit 0; }
+failWith () { print "\n${(U)@}"; exit 1; }
+
+# helper function to set up autoload functions by scanning directories
+autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
+    fpath=("$_newpath" "${fpath[@]}") _newfuncs=(${_newpath}/**/*(.))
+    for _func in "${(@)_newfuncs}"; do autoload ${_func:t}; done; done; }
+
+# our "data" directories (non executable file content)
+DATAPATHS[MANIFESTS]="${SCRIPT[ROOT]}/manifests"
+DATAPATHS[STORAGE]="${SCRIPT[ROOT]}/storage"
+
+# our initial built-in function directories
+AUTOPATHS[INSTALLERS]="${SCRIPT[ROOT]}/installers"
+AUTOPATHS[FUNCTIONS]="${SCRIPT[ROOT]}/functions"
+AUTOPATHS[USER]="${SCRIPT[ROOT]}/user"
+
+# all files in directories (and recursively scanned subdirectories) listed in
+# AUTOPATHS will be set as autoload functions
+autoInit "${(@)AUTOPATHS}"
+
+
+:''<< \
 '-----------------------------------------------------------------------'
 FRONTMATTER
 -----------------------------------------------------------------------
@@ -408,3 +529,5 @@ for _mount_point in $MOUNT_POINTS; do
     unsetActiveStorageRecordWithPrefix _record
 
 done
+
+# vim: set filetype=sh :

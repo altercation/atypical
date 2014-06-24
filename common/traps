@@ -1,0 +1,20 @@
+:<< \
+-------------------------------------------------------------------------------
+Traps & Temp
+-------------------------------------------------------------------------------
+TMPDIR="$(mktemp -d "/tmp/${SCRIPTNAME}-XXXXXX")"
+
+cleanup  () {
+    [[ -n $LOGFD ]] && exec {LOGFD}>&- && unset $LOGFD;
+    [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR";
+    }
+
+# list trap to keep it from handling subshell exits
+trap ' print "\nEXITING INSTALLER"; cleanup;' EXIT
+
+# function trap to handle subshell errors
+TRAPZERR () {
+    local _cmd=$_ _code=$?;
+    print "\nUNHANDLED ERROR in command $_cmd\n${LOGFILE:+(see ${LOGFILE:-})}" \
+    2>&$LOGFD; cleanup; exit 1;
+    }
