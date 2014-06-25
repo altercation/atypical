@@ -1,0 +1,16 @@
+:<< \
+-------------------------------------------------------------------------------
+Options
+-------------------------------------------------------------------------------
+
+# simple opt parsing since we only use debug flags
+# -d, --debug, -dd, --ddebug, -ddd, --dddebug
+[[ ${1:-} == *-ddd* ]] && DDDEBUG=true
+[[ ${1:-} == *-dd* ]]  && DDEBUG=true
+[[ ${1:-} == *-d* ]]   && DEBUG=true && shift
+
+# script options: good habits like no_unset and ensuring we fail out if
+# there are any errors... error handling must be present where "acceptable"
+# error states are anticipated
+setopt ERR_RETURN NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB NULL_GLOB \
+       ${DDEBUG:+VERBOSE} ${DDDEBUG:+XTRACE}

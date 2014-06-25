@@ -1,110 +1,99 @@
 #!/usr/bin/zsh
 
-usage () {<< \
+typeset -r USAGE="
 -------------------------------------------------------------------------------
 
-atypical
+atypical - A Typical Arch Linux Install Script
 
-part of Atypical - A Typical Arch Linux Install Script
-Ethan Schoonover <es@ethanschoonover.com>
+Author:
+
+    Ethan Schoonover <es@ethanschoonover.com>
 
 Usage:
 
-atypical manifest-filename
-atypical /full/absolute/path/to/manifest-filename
-atypical http://url/of/file/to/curl
+    atypical manifest-filename
+    atypical /full/absolute/path/to/manifest-filename
+    atypical http://url/of/file/to/curl
 
 Options:
 
--d, --debug     Debug level 1: show extra command output
--dd, --ddebug   Debug level 2: add verbose script execution option
--ddd, --dddebug Debug level 3: add xtrace script execution option
+    -d, --debug     Debug level 1: show extra command output
+    -dd, --ddebug   Debug level 2: add verbose script execution option
+    -ddd, --dddebug Debug level 3: add xtrace script execution option
 
 Examples:
 
-atypical gnome_system
-atypical xmonad_laptop
-atypical /root/atypical/manifests/quick_modified_gnome_system
-atypical http://myserver.com/my_laptop_manifest
+    atypical gnome_system
+    atypical xmonad_laptop
+    atypical /root/atypical/manifests/quick_modified_gnome_system
+    atypical http://myserver.com/my_laptop_manifest
 
-(see manifest subdirectory for manifest file content details)
+Related:
+
+See manifest subdirectory for manifest file content details.
 
 -------------------------------------------------------------------------------
-exit ${1:-0}; }
-
+"
 :<< \
 -------------------------------------------------------------------------------
 Frontmatter
 -------------------------------------------------------------------------------
 # script absolute path, name, and load of common script env, opts, functions
-
 SCRIPTNAME="${${SCRIPTPATH:=$(readlink -f $0)}:t}" SCRIPTROOT="${SCRIPTPATH:h}"
-
-[[ ! -d "${COMMON::=${(q)SCRIPTROOT}/common}" ]] \
-    && { print "\nERROR: no common directory! Exiting.\n"; exit 1; } \
-    || for _common in ${COMMON:-}/*; do source ${_common}; done
+for _common in ${SCRIPTROOT}/functions/common/*; do source ${_common}; done;
 
 :''<< \
 -------------------------------------------------------------------------------
 Setting up installer, beginning installation...
 -------------------------------------------------------------------------------
 # initial declarations
-typeset -Ax SCRIPT DATAPATHS AUTOPATHS MANIFEST CONFIG INSTALLER USER STORAGE
+typeset -Ax SCRIPT DIR FUNC CONFIG INSTALLER USER STORAGE
 
-# default values for new system mount point, temp files
+# default value for new system install mount point, chroot
 MOUNTROOT="/mnt"
 
-# helper function to set up autoload functions by scanning directories
-autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
-    fpath=("$_newpath" "${fpath[@]}") _newfuncs=(${_newpath}/**/*(.))
-    for _func in "${(@)_newfuncs}"; do autoload ${_func:t}; done; done; }
-
 # our "data" directories (non executable file content)
-DATAPATHS[MANIFESTS]="${SCRIPTROOT}/manifests"
-DATAPATHS[STORAGE]="${SCRIPTROOT}/storage"
-
-# our initial built-in function directories
-AUTOPATHS[INSTALLERS]="${SCRIPTROOT}/installers"
-AUTOPATHS[FUNCTIONS]="${SCRIPTROOT}/functions"
-AUTOPATHS[USER]="${SCRIPTROOT}/user"
-
-# all files in directories (and recursively scanned subdirectories) listed in
-# AUTOPATHS will be set as autoload functions
-autoInit "${(@)AUTOPATHS}"
+DIR[MANIFESTS]="${SCRIPTROOT}/manifests"
+DIR[STORAGE]="${SCRIPTROOT}/storage"
 
 :""<< \
 -------------------------------------------------------------------------------
 Loading & processing atypical manifest file
 -------------------------------------------------------------------------------
 # If the manifest file hasn't been specified as arg 1 on the command line, fail
-if [[ -z ${MANIFEST[FILE]:=${1:-}} ]]; then
-    teeLog "MANIFEST FILE NOT SPECIFIED" && usage 1
+[[ -n ${MANIFEST:=${1:-}} ]] || { teeLog "NO MANIFEST SPECIFIED" && usage 1; }
+
+# source remote or create absolute filepath
+if [[ "$MANIFEST" =~ "(http|ftp)s?:.*" ]]; then
+    _temp_filepath=$TMPDIR/loadfile
+    { curl -sL $MANIFEST > $_temp_filepath } ioLog \
+            || {print "\nFailed to retrieve remote manifest. Exiting.";
+                exit 1;}
+    MANIFEST="$_temp_filepath"
 fi
 
-# Make sure we can load the file. sourceFile will source local manifests
-# in the default manifests subdirectory of the atypical directory, or will
-# load any absolute path provided. Additionally, it will download a remote
-# manifest from a given URL.
-if sourceFile "${MANIFEST[FILE]}" "${SCRIPTROOT}/manifests"; then
-    teeLog "Loaded manifest successfully..."
-else
-    teeLog "Failure loading manifest..."
-    return 1
-fi
+# create absolute path
+[[ "${MANIFEST:0:1}" == "/" ]] \
+    || MANIFEST="$SCRIPTROOT/manifests/$MANIFEST"
+
+# confirm manifest exists
+[[ -f "$MANIFEST" ]] \
+    || { teeLog "\nCould not find manifest at $MANIFEST. Exiting."; exit 1; }
+
+{ source "$MANIFEST" } ioLog
 
 # If the manifest contains a SCRIPT[CUSTOM]="http://repo.url/goes/here" style
 # declaration, that url is used as a git repository "root". This is then
 # cloned locally.
-if [[ "${SCRIPT[CUSTOM_ROOT]:-}" =~ "(https?|git):.*" ]]; then
-    teeLog "Cloning custom script repository..."
-    (git clone --progress "${SCRIPT[CUSTOM_ROOT]}" "$TMPDIR/custom") ioLogNull
-    if (( $? == 0 )); then
-        SCRIPT[CUSTOM_ROOT]="$TMPDIR/custom"
-        teeLog "Successfully cloned custom script respository"
-    else
-        errLog "FAILED to clone custom script respository"
-    fi
-fi
+[[ ! "${CUSTOM_ROOT:-}" =~ "(https?|git):.*" ]] || {
+    {   print "Cloning custom script repository...";
+        git clone --progress "${CUSTOM_ROOT:-}" "$TMPDIR/custom"; } ioLog \
+        && { CUSTOM_ROOT="$TMPDIR/custom";
+             successLog "Successfully cloned custom script respository"; } \
+        || { errorLog "Failed to clone custom script respository." }
+    }
+
+exit
 
 # If a custom root has been set in the manifest and successfully cloned, its
 # subdirectories are scanned and all files added as autoload functions that
@@ -122,6 +111,28 @@ if [[ "${${SCRIPT[CUSTOM_ROOT]:-}:0:1}" == "/" ]]; then
 elif [[ -n "${SCRIPT[CUSTOM_ROOT]:-}" ]]; then
     errLog "Failed to source/set new script source as listed in manifest."
 fi
+exit
+
+:""<< \
+-------------------------------------------------------------------------------
+Autoloading installer functions
+-------------------------------------------------------------------------------
+# autoload all functions, custom second so that it is first in line in fpath
+(){ for _root; do fpath=($_root/{installers,functions,user} "${fpath[@]}");
+    for _func in $_root/{installers,functions,user}/**~common/*(.);
+    do autoload ${_func:t}; done; done; } $SCRIPTROOT ${CUSTOMROOT:-}
+
+# helper function to set up autoload functions by scanning directories
+autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
+    fpath=("$_newpath" "${fpath[@]}") _newfuncs=(${_newpath}/**/*(.))
+    for _func in "${(@)_newfuncs}"; do autoload ${_func:t}; done; done; }
+
+# all files in directories (and recursively scanned subdirectories) listed in
+# AUTOPATHS will be set as autoload functions
+#autoInit "${(@)AUTOPATHS}"
+
+
+
 
 :""<< \
 -------------------------------------------------------------------------------
