@@ -39,12 +39,19 @@ See manifest subdirectory for manifest file content details.
 Frontmatter
 -------------------------------------------------------------------------------
 # script absolute path, name, and load of common script env, opts, functions
-SCRIPTNAME="${${SCRIPTPATH:=$(readlink -f $0)}:t}" SCRIPTROOT="${SCRIPTPATH:h}"
-for _common in ${SCRIPTROOT}/functions/common/*; do source ${_common}; done;
+SCRIPT_NAME="${${SCRIPT_PATH:=$(readlink -f $0)}:t}"
+SCRIPT_ROOT="${SCRIPT_PATH:h}"
+for _common in ${SCRIPT_ROOT}/functions/common/*; do source ${_common}; done;
+
+# root?
+true && :"" <<< "Beginning $SCRIPT_NAME installer" \
+# [[ "$(whoami)" == "root" ]] \
+#     && :"" <<<"\nBeginning $SCRIPT_NAME installer" \
+#     || errorLog "Must be root to run this install script."
 
 :''<< \
 -------------------------------------------------------------------------------
-Setting up installer, beginning installation...
+Setting up installer environment
 -------------------------------------------------------------------------------
 # initial declarations
 typeset -Ax SCRIPT DIR FUNC CONFIG INSTALLER USER STORAGE
@@ -52,87 +59,75 @@ typeset -Ax SCRIPT DIR FUNC CONFIG INSTALLER USER STORAGE
 # default value for new system install mount point, chroot
 MOUNTROOT="/mnt"
 
-# our "data" directories (non executable file content)
-DIR[MANIFESTS]="${SCRIPTROOT}/manifests"
-DIR[STORAGE]="${SCRIPTROOT}/storage"
-
 :""<< \
 -------------------------------------------------------------------------------
 Loading & processing atypical manifest file
 -------------------------------------------------------------------------------
 # If the manifest file hasn't been specified as arg 1 on the command line, fail
-[[ -n ${MANIFEST:=${1:-}} ]] || { teeLog "NO MANIFEST SPECIFIED" && usage 1; }
+[[ -n ${MANIFEST:=${1:-}} ]] \
+    || { errorPrint "NO MANIFEST SPECIFIED" && usage 1; }
 
 # source remote or create absolute filepath
 if [[ "$MANIFEST" =~ "(http|ftp)s?:.*" ]]; then
-    _temp_filepath=$TMPDIR/loadfile
-    { curl -sL $MANIFEST > $_temp_filepath } ioLog \
-            || {print "\nFailed to retrieve remote manifest. Exiting.";
-                exit 1;}
-    MANIFEST="$_temp_filepath"
+    { curl -#L $MANIFEST -o $TMPDIR/manifest } ioLog \
+    && { successLog "Retrieved remote manifest file.";
+         MANIFEST="$TMPDIR/manifest"; } \
+    || { errorLog "Failed to retrieve remote manifest. Check URL:" ||
+         errorLog "$MANIFEST"; }
 fi
 
 # create absolute path
-[[ "${MANIFEST:0:1}" == "/" ]] \
-    || MANIFEST="$SCRIPTROOT/manifests/$MANIFEST"
+[[ "${MANIFEST:0:1}" == "/" ]] || MANIFEST="$SCRIPT_ROOT/manifests/$MANIFEST"
 
-# confirm manifest exists
-[[ -f "$MANIFEST" ]] \
-    || { teeLog "\nCould not find manifest at $MANIFEST. Exiting."; exit 1; }
+# confirm manifest exists, then source
+[[ -f "$MANIFEST" ]] || errorLog "Could not find manifest at $MANIFEST."
+{ source "$MANIFEST" } ioLog \
+    || errorLog "Error while reading manifest: check formating and values."
 
-{ source "$MANIFEST" } ioLog
+# if custom root set, set a convenience variable
+[[ -z "${CUSTOM_ROOT:-}" ]] || CUSTOM=true
 
 # If the manifest contains a SCRIPT[CUSTOM]="http://repo.url/goes/here" style
 # declaration, that url is used as a git repository "root". This is then
 # cloned locally.
 [[ ! "${CUSTOM_ROOT:-}" =~ "(https?|git):.*" ]] || {
-    {   print "Cloning custom script repository...";
-        git clone --progress "${CUSTOM_ROOT:-}" "$TMPDIR/custom"; } ioLog \
-        && { CUSTOM_ROOT="$TMPDIR/custom";
-             successLog "Successfully cloned custom script respository"; } \
-        || { errorLog "Failed to clone custom script respository." }
+        progressLog "Cloning custom script repository";
+        { git clone --progress "${CUSTOM_ROOT:-}" "$TMPDIR/custom"; } ioLog \
+        && { successLog "Done.";
+             CUSTOM_ROOT="$TMPDIR/custom"; } \
+        || { errorLog "Failed." }
     }
-
-exit
 
 # If a custom root has been set in the manifest and successfully cloned, its
 # subdirectories are scanned and all files added as autoload functions that
 # take precedence over built-in autoloaded functions. thus any atypical
 # function or installer can (and will) be overridden by a user file of the
 # same name.
-if [[ "${${SCRIPT[CUSTOM_ROOT]:-}:0:1}" == "/" ]]; then
-    DATAPATHS[CUSTOM_MANIFESTS]="${SCRIPT[CUSTOM_ROOT]}/manifests"
-    DATAPATHS[CUSTOM_STORAGE]="${SCRIPT[CUSTOM_ROOT]}/storage"
-    AUTOPATHS[CUSTOM_FUNCTIONS]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-    AUTOPATHS[CUSTOM_INSTALLERS_PATH]="${SCRIPT[CUSTOM_ROOT]}/installers"
-    AUTOPATHS[CUSTOM_USER_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-    autoInit "${(@v)AUTOPATHS[(I)CUSTOM*]}" "${SCRIPT[CUSTOM_ROOT]}"
-    teeLog "Successfully set custom script source as listed in manifest."
-elif [[ -n "${SCRIPT[CUSTOM_ROOT]:-}" ]]; then
-    errLog "Failed to source/set new script source as listed in manifest."
-fi
-exit
+# if [[ "${${SCRIPT[CUSTOM_ROOT]:-}:0:1}" == "/" ]]; then
+#     DATAPATHS[CUSTOM_MANIFESTS]="${SCRIPT[CUSTOM_ROOT]}/manifests"
+#     DATAPATHS[CUSTOM_STORAGE]="${SCRIPT[CUSTOM_ROOT]}/storage"
+#     AUTOPATHS[CUSTOM_FUNCTIONS]="${SCRIPT[CUSTOM_ROOT]}/scripts"
+#     AUTOPATHS[CUSTOM_INSTALLERS_PATH]="${SCRIPT[CUSTOM_ROOT]}/installers"
+#     AUTOPATHS[CUSTOM_USER_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
+#     autoInit "${(@v)AUTOPATHS[(I)CUSTOM*]}" "${SCRIPT[CUSTOM_ROOT]}"
+#     teeLog "Successfully set custom script source as listed in manifest."
+# elif [[ -n "${SCRIPT[CUSTOM_ROOT]:-}" ]]; then
+#     errLog "Failed to source/set new script source as listed in manifest."
+# fi
+# exit
 
 :""<< \
 -------------------------------------------------------------------------------
 Autoloading installer functions
 -------------------------------------------------------------------------------
 # autoload all functions, custom second so that it is first in line in fpath
-(){ for _root; do fpath=($_root/{installers,functions,user} "${fpath[@]}");
-    for _func in $_root/{installers,functions,user}/**~common/*(.);
-    do autoload ${_func:t}; done; done; } $SCRIPTROOT ${CUSTOMROOT:-}
-
-# helper function to set up autoload functions by scanning directories
-autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
-    fpath=("$_newpath" "${fpath[@]}") _newfuncs=(${_newpath}/**/*(.))
-    for _func in "${(@)_newfuncs}"; do autoload ${_func:t}; done; done; }
-
-# all files in directories (and recursively scanned subdirectories) listed in
-# AUTOPATHS will be set as autoload functions
-#autoInit "${(@)AUTOPATHS}"
-
-
-
+for _root in $SCRIPT_ROOT ${CUSTOM_ROOT:-}; do
+    fpath=($_root/{installers,functions,user} "${fpath[@]}")
+    for _func in $_root/{installers,functions,user}/**~common/*(.); do
+        autoload ${_func:t}
+    done
+done
+successLog "Loaded installer functions."
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -141,43 +136,60 @@ Preparing storage
 # expects STORAGE[TABLE] as scalar value, either filename or actual table data
 # check that we have something in the STORAGE[TABLE] value and if we do then
 # convert to array for easy multiline check
-if [[ -n "${STORAGE[TABLE]:-}" ]]; then
-    STORAGE_TABLE_DATA=(${(f)STORAGE[TABLE]:-})
-else
-    failWith "No storage table data / filename present in manifest."
-fi
+[[ -n "${STORAGE[TABLE]:-}" ]] \
+    && STORAGE_TABLE_DATA=(${(f)STORAGE[TABLE]:-}) \
+    || errorLog "No storage table data / filename present in manifest."
 
 # single line value, assume is filename for storage table; check & read
 if [[ -z "${STORAGE_TABLE_DATA[2]:-}" ]]; then
 
     # set up file path for custom storage
-    STORAGE_FILE="${DATAPATHS[CUSTOM_STORAGE]:-}/${STORAGE_TABLE_DATA}"
-
-    # if missing, then fallback to built in
-    [[ -f "${STORAGE_FILE}" ]] \
-    || STORAGE_FILE="${DATAPATHS[STORAGE]}/${STORAGE_TABLE_DATA}"
-
-    # if still missing, we have a problem with a missing file or bad filename
-    [[ -f "${STORAGE_FILE}" ]] \
-    || failWith "Storage table file not found at $STORAGE_FILE"
+    if ${CUSTOM:-false}; then # custom
+        if [[ -f "${STORAGE_FILE::=${CUSTOM_ROOT:-}/storage/${STORAGE_TABLE_DATA}}" ]];
+        then
+            printLog \
+            "Using custom storage table definition: $STORAGE_TABLE_DATA."
+        elif [[ -f "${STORAGE_FILE::=${SCRIPT_ROOT:-}/storage/${STORAGE_TABLE_DATA}}" ]];
+        then
+            printLog \
+            "No custom storage table file named $STORAGE_TABLE_DATA." \
+            "\nUsing default storage table definition at $STORAGE_FILE."
+        else
+            errorLog \
+            "ERROR: No custom storage table file named $STORAGE_TABLE_DATA." \
+            "\nNo matching default storage table definition found in " \
+            "$SCRIPT_ROOT/storage"
+        fi
+    elif [[ -f "${STORAGE_FILE::=${SCRIPT_ROOT:-}/storage/${STORAGE_TABLE_DATA}}" ]];
+    then
+            printLog \
+            "Using default storage table named $STORAGE_TABLE_DATA " \
+            "at $STORAGE_FILE."
+    else
+            errorLog \
+            "No storage table named $STORAGE_TABLE_DATA found " \
+            "in $SCRIPT_ROOT/storage"
+    fi
 
     # write file contents to value, stripping comment lines
     egrep -v "^#|^$" "${STORAGE_FILE}" > $TMPDIR/STORAGE_TABLE \
-    || failWith "Failed to read storage file $STORAGE_FILE"
+        || errorLog "Failed to read storage file $STORAGE_FILE"
 
-    # if we successfully processed, read it into the correct scalar variable
+    # if successfully processed, read it into the correct scalar variable
     STORAGE[TABLE]="$(cat $TMPDIR/STORAGE_TABLE)"
 
     # cleanup
     rm $TMPDIR/STORAGE_TABLE &>/dev/null
 
+    # include in log and debug output
+    debugLog "${STORAGE[TABLE]}"
+
 fi
 
-# call atypical's init-storage with whatever the current value is
+# call atypical's init-storage with actual storage table data
 # (init-storage takes either a file path or table data, but we've normalized
 # to table data here)
-init-storage "${STORAGE[TABLE]}"
-print "in script"
+init-storage -s "${STORAGE[TABLE]}"
 exit
 
 :""<< \
@@ -206,24 +218,24 @@ CREATE CHROOT SCRIPT; CHROOT, COMPLETION, CLEANUP
 # extract everything after this section with necessary variables prefixed
 
 # initialize new script
-CHROOT_SCRIPTNAME="${SCRIPTNAME}-chroot"
-CHROOT_SCRIPTPATH="$MOUNT_ROOT/$CHROOT_SCRIPTNAME"
-echo "#!/usr/bin/zsh" >> "$CHROOT_SCRIPTPATH"
+CHROOT_SCRIPT_NAME="${SCRIPT_NAME}-chroot"
+CHROOT_SCRIPT_PATH="$MOUNT_ROOT/$CHROOT_SCRIPT_NAME"
+echo "#!/usr/bin/zsh" >> "$CHROOT_SCRIPT_PATH"
 
 # dump required variables and arrays into new script
 function {
 for _param
 do
-    typeset -p $_param >> "$CHROOT_SCRIPTPATH"
+    typeset -p $_param >> "$CHROOT_SCRIPT_PATH"
 done
 } INSTALL CONFIG MKFS_OPTIONS MOUNT_OPTIONS LUKS_OPTIONS STORAGE_RECORDS
 
 # dump functions into script
-cat ${SCRIPTROOT}/scripts/functions >> "$CHROOT_SCRIPTPATH"
+cat ${SCRIPT_ROOT}/scripts/functions >> "$CHROOT_SCRIPT_PATH"
 
 # dump remainder of file into chroot script
-sed -n "/>\{10\}/,$ p" "$SCRIPTPATH" >> "$CHROOT_SCRIPTPATH"
-chmod +x "$CHROOT_SCRIPTPATH"
+sed -n "/>\{10\}/,$ p" "$SCRIPT_PATH" >> "$CHROOT_SCRIPT_PATH"
+chmod +x "$CHROOT_SCRIPT_PATH"
 
 #DEBUG
 print "CHECK CHROOT SCRIPT"

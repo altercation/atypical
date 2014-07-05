@@ -1,4 +1,4 @@
-:''<< \
+:<< \
 -----------------------------------------------------------------------
 SAMPLE MANIFEST
 -----------------------------------------------------------------------
@@ -23,7 +23,7 @@ SAMPLE MANIFEST
 CUSTOM_ROOT="https://github.com/altercation/atypical.git"
 STORAGE[TABLE]="encrypt_btrfs_subvols"
 
-:''<< \
+:<< \
 -----------------------------------------------------------------------
 ASSIGNING SYSTEM CONFIG VALUES
 -----------------------------------------------------------------------
@@ -37,7 +37,7 @@ CONFIG[CONSOLEFONT]="Lat2-Terminus16"
 CONFIG[USER,NAME]="es"
 CONFIG[USER,SHELL]="zsh"
 
-:''<< \
+:<< \
 -----------------------------------------------------------------------
 ASSIGNING SYSTEM INSTALLER FUNCTIONS
 -----------------------------------------------------------------------
@@ -52,7 +52,7 @@ INSTALLER[UTILS]="utils_admin utils_file utils_mlocate utils_cron utils_disk uti
 INSTALLER[APPS]="apps_vm"
 INSTALLER[MISC]=""
 
-:''<< \
+:<< \
 -----------------------------------------------------------------------
 ASSIGNING USER INSTALLER FUNCTIONS
 -----------------------------------------------------------------------

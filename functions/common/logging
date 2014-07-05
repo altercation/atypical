@@ -6,7 +6,7 @@ Logging functions
 # and thus we check to see if LOGFD has already been defined, skipping if so.
 # This allows autoload function scripts to also act as stand alone scripts with
 # their own independent logging if called directly from the command line.
-(( LOGFD )) || { rm -f "${LOGFILE:=/tmp/${SCRIPTNAME}.log}"; } always
+(( LOGFD )) || { rm -f "${LOGFILE:=/tmp/${SCRIPT_NAME}.log}"; } always
                { integer LOGFD; exec {LOGFD} >> "${LOGFILE}"; }
 
 # teeLog: tee like logging. Examples:
@@ -22,11 +22,22 @@ defined teeLog || {
 teeLog () { [[ "${1:-}" == "-w" ]] && w="${(r:80::--:):-}" && shift || w=""
     m=("${@:-$(while read line; do print $line; done)}");
     print -- "${w:-}${w:+\n}${(@F)m:-}${w:+\n}${w:-}" >&1 >&$LOGFD;} }
+defined progressLog || {
+    progressLog () { print $( ${DEBUG:-false} \
+                     || print -- "-n") -- "${@:-}..." >&1 >&$LOGFD; } }
 defined printLog || { printLog () { print -- "${@:-}" >&1 >&$LOGFD; } }
 defined errorPrint || { errorPrint () { print -P -- "%F{red}${@:-}%f"; } }
-defined successPrint || { successPrint () { print -P -- "%F{green}${@:-}%f"; } }
+defined errorlog || { errorLog () { errorPrint "$@" >&1 >&$LOGFD 2>&$LOGFD; return 1; } }
 defined errorlog || { errorLog () { errorPrint "$@" >&1 >&$LOGFD; return 1; } }
+defined successPrint || { successPrint () { print -P -- "%F{green}${@:-}%f"; } }
 defined successlog || { successLog () { successPrint "$@" >&1 >&$LOGFD; } }
+defined debugLog || {
+    if ${DEBUG:-false}; then
+        debugLog () { print -- "${@:-}" >&1 >&$LOGFD; }
+    else
+        debugLog () { print -- "${@:-}" >&$LOGFD; }
+    fi
+    }
 
 # semantic comments:
 # Without these aliases, the semantic comment style is ignored silently

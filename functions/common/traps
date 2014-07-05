@@ -2,7 +2,7 @@
 -------------------------------------------------------------------------------
 Traps & Temp
 -------------------------------------------------------------------------------
-TMPDIR="$(mktemp -d "/tmp/${SCRIPTNAME}-XXXXXX")"
+TMPDIR="$(mktemp -d "/tmp/${SCRIPT_NAME}-XXXXXX")"
 
 cleanup  () {
     ${CLEANUP:-false} && return 0 || :

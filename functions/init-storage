@@ -1,7 +1,7 @@
 #!/usr/bin/zsh
 
-usage () {<< \
------------------------------------------------------------------------
+(( ${+USAGE} )) || USAGE='
+-------------------------------------------------------------------------------
 
 init-storage
 
@@ -20,271 +20,445 @@ init-storage btrfs-simple
 init-storage /root/atypical/storage/my-storage-setup
 init-storage http://myserver.com/storage
 
-init-storage can also take the actual table data in lieu of a filename
-as the argument:
+(see storage subdirectory of atypical for details on format)
 
-init-storage "
-==========================================================================
-SIZE   CODE   LABEL       CHILD_OF    FSTYPE   MOUNT_POINT   MOUNT_OPTIONS
---------------------------------------------------------------------------
--      -      root        -           btrfs    /             -
-==========================================================================
-"
-
-(see storage subdirectory of the atypical git respository)
-
------------------------------------------------------------------------
-exit ${1:-0}; }
-
+-------------------------------------------------------------------------------
+' 
+:<< \
+-------------------------------------------------------------------------------
+Script environment
+-------------------------------------------------------------------------------
+# script absolute path, name, and load of common script env, opts, functions
+# if defined already in main atypical script, use those, otherwise redefine
+# here
+(( ${+SCRIPT_ROOT} )) || {
+    SCRIPT_NAME="${${SCRIPT_PATH:=$(readlink -f $0)}:t}"
+    # we use the actual atypical script root here
+    SCRIPT_ROOT="${${SCRIPT_PATH::=${SCRIPT_PATH:h}}:h}"
+    FUNC_ROOT="${SCRIPT_ROOT}/functions"
+    for _fm in ${FUNC_ROOT}/environment/*; do source ${_fm}; done
+    }
 
 :<< \
 -------------------------------------------------------------------------------
-Frontmatter
--------------------------------------------------------------------------------
-# simple opt parsing since we only use debug flags
-# -d, --debug, -dd, --ddebug, -ddd, --dddebug
-[[ ${1:-} == *-ddd* ]] && DDDEBUG=true
-[[ ${1:-} == *-dd* ]]  && DDEBUG=true
-[[ ${1:-} == *-d* ]]   && DEBUG=true && shift
-
-# script options: good habits like no_unset and ensuring we fail out if
-# there are any errors... error handling must be present where "acceptable"
-# error states are anticipated
-setopt ERR_RETURN NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB \
-       ${DDEBUG:+VERBOSE} ${DDDEBUG:+XTRACE}
-
-:<< \
--------------------------------------------------------------------------------
-Logging functions
--------------------------------------------------------------------------------
-
-# set up log file and fd
-rm "${LOGFILE:=/tmp/init-storage.log}" &>/dev/null || true
-integer LOGFD; exec {LOGFD} >> "${LOGFILE}"
-
-# teeLog: tee like logging. Examples:
-#     teeLog "message"
-#     teeLog -w "wrapped message"
-#     print "message" | teeLog
-#     teeLog <<< "message" 
-#     teeLog -w <<EOF
-#     "wrapped message" 
-#     EOF
-
-teeLog () { [[ "${1:-}" == "-w" ]] && w="${(r:80::--:):-}" && shift || w=""
-    m=("${@:-$(while read line; do print $line; done)}");
-    print -- "${w:-}${w:+\n}${(@F)m:-}${w:+\n}${w:-}" >&1 >&$LOGFD 2>&1;}
-
-# semantic comments:
-# Without these aliases, the semantic comment style is ignored silently
-# as "just a comment". With these aliases, the semantic comment content
-# is output to the console and logged.
-alias -g  :\'\'='teeLog'
-alias -g  :\"\"='teeLog -w'
-
-# ioLog* is used herein to allow stderr messages to be captured and also
-# allow errors to be handled by ERR_RETURN, TRAPERR/TRAPZERR. Examples:
-#
-#     (print "this will succeed"; this_will_fail ) ioLogOutErr
-#         will allow both stdout and stderr messages out to console
-#         and also log them to the logfile; the error will be handled
-#         normally by the script (ignored, exited, trapped, etc.)
-#
-#     (print "this will succeed"; this_will_fail ) ioLogOut
-#         will allow only stdout to console but will still log both
-#         stdout and stderr to the logfile; the error will be handled
-#         normally by the script (ignored, exited, trapped, etc.)
-#
-#     (print "this will succeed"; this_will_fail ) ioLogNull
-#         will allow neither stdout nor stderr out to the console but
-#         will log both to the logfile; the error will be handled
-#         normally by the script (ignored, exited, trapped, etc.)
-alias ioLogOutErr=">&1 >&$LOGFD 2>&1"
-alias ioLogOut=">&1 >&$LOGFD 2>&$LOGFD"
-alias ioLogNull=">&$LOGFD 2>&$LOGFD"
-[[ -n ${DEBUG:-} ]] && \
-alias ioLogOut=">&1 >&$LOGFD 2>&1" && \
-alias ioLogNull=">&1 >&$LOGFD 2>&1"
-
-:''<< \
--------------------------------------------------------------------------------
-Setting up installer, beginning installation...
+Initialize variables and check arguments
 -------------------------------------------------------------------------------
 # initial declarations
-typeset -Ax SCRIPT DATAPATHS AUTOPATHS MANIFEST CONFIG INSTALLER USER STORAGE
+# typeset -Ax SCRIPT DATAPATHS AUTOPATHS MANIFEST CONFIG INSTALLER USER STORAGE
 
-# make sure we know where the real script (and subdirectories) are
-SCRIPT[NAME]="${${_PATH:=$(readlink -f "$0")}:t}" SCRIPT[ROOT]="${_PATH:h}"
+[[ -n "${MOUNTROOT:-}" ]] \
+    && MOUNTROOT="${MOUNTROOT:-}" || MOUNTROOT="${2:-/mnt}"
 
-# default values for new system mount point, temp files
-MOUNTROOT="/mnt"
-TMPDIR="$(mktemp -d "/tmp/${SCRIPT[NAME]}-XXXXXX")"
+RAM=$(print "$(( $(print ${$(cat /proc/meminfo \
+    | grep -i memtotal)[2]}) / 1000000 ))G")
 
-# zsh trap functions
-cleanup  () { [[ -n $LOGFD ]] && exec {LOGFD}>&- && unset $LOGFD;
-              [[ -d "$TMPDIR" ]] && rm -rf "$TMPDIR"; }
+# fail if missing storage table filename/path argyment
+[[ -n ${STORAGE_FILE:=${1:-}} ]] \
+    || { errorLog "No storage table file specified." || usage 1; }
 
-# list trap to keep it from handling subshell exits
-trap ' print "\nEXITING INSTALLER"; cleanup;' EXIT
-
-# function trap to handle subshell errors
-TRAPZERR () { local _cmd=$_ _code=$?;
-              print "\nUNHANDLED ERROR in command $_cmd\n(see $LOGFILE)\n" \
-              2>&$LOGFD; cleanup; exit 1; }
-
-exitWith () { print "$@"; exit 0; }
-failWith () { print "\n${(U)@}"; exit 1; }
-
-# helper function to set up autoload functions by scanning directories
-autoInit () { for _newpath; do [[ -d "$_newpath" ]] && \
-    fpath=("$_newpath" "${fpath[@]}") _newfuncs=(${_newpath}/**/*(.))
-    for _func in "${(@)_newfuncs}"; do autoload ${_func:t}; done; done; }
-
-# our "data" directories (non executable file content)
-DATAPATHS[MANIFESTS]="${SCRIPT[ROOT]}/manifests"
-DATAPATHS[STORAGE]="${SCRIPT[ROOT]}/storage"
-
-# our initial built-in function directories
-AUTOPATHS[INSTALLERS]="${SCRIPT[ROOT]}/installers"
-AUTOPATHS[FUNCTIONS]="${SCRIPT[ROOT]}/functions"
-AUTOPATHS[USER]="${SCRIPT[ROOT]}/user"
-
-# all files in directories (and recursively scanned subdirectories) listed in
-# AUTOPATHS will be set as autoload functions
-autoInit "${(@)AUTOPATHS}"
-
-
-:''<< \
-'-----------------------------------------------------------------------'
-FRONTMATTER
------------------------------------------------------------------------
-
-# script options
-setopt ERR_RETURN NO_UNSET EXTENDED_GLOB #VERBOSE XTRACE
-
-# declaration
-typeset -Ag CONFIG INSTALLER \
-            MKFS_OPTIONS MOUNT_OPTIONS LUKS_OPTIONS
-typeset -ag MODULES MANIFEST BOOTOPTS STORAGE
-
-# environment
-MOUNT_ROOT=/mnt
-SCRIPT=$(readlink -f "$0"); SCRIPT_PATH=$(dirname "$SCRIPT")
-fpath=(${SCRIPT_PATH}/installers $fpath)
-
-# check for manifest argument
-if [[ -z ${1:-} ]]; then
-    print "\nRequires manifest file as parameter. One of:\n"
-    ls -1 "$SCRIPT_PATH/manifests"
-    print "\nExiting.\n"
-    exit 1
-fi
-    
-# source externals
-source ${SCRIPT_PATH}/scripts/functions
-MANIFEST_PATH="${SCRIPT_PATH}/manifests/$1"
-if [ -e "${MANIFEST_PATH}" ]; then
-    source "${MANIFEST_PATH}"
-else
-    echo "No manifest found at ${MANIFEST_PATH}; exiting"
-    exit
-fi
-
-# system
-RAM=$(detectMemory)
+TMPSTOR="$TMPDIR/storage"
+[[ -f "$TMPSTOR" ]] \
+    && errorLog "Temp file collision: $TMPSTOR already exists, but shouldn't!"
 
 :<< \
------------------------------------------------------------------------
-STORAGE OPTIONS
------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+Setting storage options
+-------------------------------------------------------------------------------
 # These will be applied generally and can be appended on a device by
 # device basis in the storage table (in the storage_* pattern file)
 
-# USE COLUMN NAME VARIABLES WITH UNDERSCORE PREFIX FOR RUN TIME REPLACEMENT
-# e.g. $_LABEL in the scalar values below will be replaced with the
-# LABEL field value for the specific block item at run time
+# NOTE -- use $_record_fieldname to refer to record specific values to
+# be replaced at run time (e.g. $_record_label to use the LABEL field
+# value for the record which the option will be applied to).
 
-# NOTE -- Updated format - using _record_label instead of _LABEL to
-# refer to record specific values to be replaced at run time
+typeset -A STOROPTS STORCMD
 
+STORCMD[BTRFS]=''
+STORCMD[BTRFS]=''
+STORCMD[VFAT]=''
+STORCMD[VFAT,SSD]=''
+STORCMD[EXFAT]=''
+STORCMD[EXT2]=''
+STORCMD[EXT3]=''
+STORCMD[EXT4]=''
+STORCMD[F2FS]=''
+STORCMD[JFS]=''
+STORCMD[NILFS2]=''
+STORCMD[NTFS]=''
+STORCMD[REISER4]=''
+STORCMD[REISERFS]=''
+STORCMD[XFS]=''
+STORCMD[ZFS]=''
 
-# labelling a partition with one of these BOOTABLE_LABELS results in
-# the partition being marked as a boot parition
-BOOTABLE_LABELS=(BOOT EFI)
+STOROPTS[MKFS,COMMON]=''
+STOROPTS[MKFS,SSD]=''
+STOROPTS[MKFS,BTRFS]='--force --label $_record_label'
+STOROPTS[MKFS,BTRFS,SSD]='--metadata single' # see man mkfs.btrfs
+STOROPTS[MKFS,VFAT]='-F32 -n $_record_label'
+STOROPTS[MKFS,VFAT,SSD]=''
+STOROPTS[MKFS,EXFAT]=''
+STOROPTS[MKFS,EXT2]=''
+STOROPTS[MKFS,EXT3]=''
+STOROPTS[MKFS,EXT4]=''
+STOROPTS[MKFS,F2FS]=''
+STOROPTS[MKFS,JFS]=''
+STOROPTS[MKFS,NILFS2]=''
+STOROPTS[MKFS,NTFS]=''
+STOROPTS[MKFS,REISER4]=''
+STOROPTS[MKFS,REISERFS]=''
+STOROPTS[MKFS,XFS]=''
+STOROPTS[MKFS,ZFS]=''
 
-MKFS_OPTIONS[COMMON]=''
-MKFS_OPTIONS[SSD]=''
-MKFS_OPTIONS[FAT]='-F32 -n $_record_label'
-MKFS_OPTIONS[FAT,SSD]=''
-MKFS_OPTIONS[BTRFS]='--force --label $_record_label'
-MKFS_OPTIONS[BTRFS,SSD]='--metadata single' # see man mkfs.btrfs
-
-MOUNT_OPTIONS[COMMON]='rw'
-MOUNT_OPTIONS[SSD]='noatime'
-MOUNT_OPTIONS[BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
-MOUNT_OPTIONS[BTRFS,SSD]='ssd,discard_space'
-MOUNT_OPTIONS[LUKS]=''
+STOROPTS[MOUNT,COMMON]='rw'
+STOROPTS[MOUNT,SSD]='noatime'
+STOROPTS[MOUNT,BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
+STOROPTS[MOUNT,BTRFS,SSD]='ssd,discard_space'
+STOROPTS[MOUNT,VFAT]='-F32 -n $_record_label'
+STOROPTS[MOUNT,VFAT,SSD]=''
+STOROPTS[MOUNT,EXFAT]=''
+STOROPTS[MOUNT,EXT2]=''
+STOROPTS[MOUNT,EXT3]=''
+STOROPTS[MOUNT,EXT4]=''
+STOROPTS[MOUNT,F2FS]=''
+STOROPTS[MOUNT,JFS]=''
+STOROPTS[MOUNT,NILFS2]=''
+STOROPTS[MOUNT,NTFS]=''
+STOROPTS[MOUNT,REISER4]=''
+STOROPTS[MOUNT,REISERFS]=''
+STOROPTS[MOUNT,XFS]=''
+STOROPTS[MOUNT,ZFS]=''
 
 # Note that --force-password allows weak passphrases (for testing only)
-LUKS_OPTIONS[FORMAT_OPTIONS]='--force-password'
-LUKS_OPTIONS[OPEN_OPTIONS]=''
-LUKS_OPTIONS[OPEN_OPTIONS,SSD]='--allow-discards'
+STOROPTS[LUKS,FORMAT]='--force-password'
+STOROPTS[LUKS,OPEN]=''
+STOROPTS[LUKS,OPEN,SSD]='--allow-discards'
 
-:<< \
------------------------------------------------------------------------
-CHECK FOR ROOT - Customization shouldn't be necessary from here on
------------------------------------------------------------------------
-if [[ "$(whoami)" != "root" ]]; then
-    notify "Must be root to run this install script. Exiting."
-    exit 1
+:""<< \
+-------------------------------------------------------------------------------
+Loading & processing atypical storage table file
+-------------------------------------------------------------------------------
+# source remote or create absolute filepath
+if [[ "$STORAGE_FILE" =~ "(http|ftp)s?:.*" ]]; then
+    { curl -#L $STORAGE_FILE -o $TMPSTOR } ioLog \
+    && { successLog "Retrieved remote storage table file.";
+         STORAGE_FILE="$TMPSTOR"; } \
+    || errorLog "Failed to retrieve remote storage table file. Check URL:" \
+                "$STORAGE_FILE";
 fi
 
-:<< \
-'-----------------------------------------------------------------------'
-DISK SELECTION
------------------------------------------------------------------------
+# create absolute path if storage value is simple filename or relative path
+# finally confirming that storage path exists
+if [[ "${STORAGE_FILE:0:1}" != "/" ]]; then
+    if [[ -n "${CUSTOM_ROOT:-}" ]] \
+    && [[ -f "${STORAGE_PATH::=$CUSTOM_ROOT/storage/$STORAGE_FILE}" ]]; then
+        # found custom rooted storage file
+        successLog "Found custom storage table file $STORAGE_FILE." || \
+    elif [[ -f "${STORAGE_PATH::=$SCRIPT_ROOT/storage/$STORAGE_FILE}" ]]; then
+        # found custom rooted storage file
+        successLog "Found storage table file $STORAGE_FILE." || \
+        debugLog "Used storage path: $STORAGE_PATH"
+    else
+        errorLog "Could not find storage table file named $STORAGE_FILE." \
+                 "\nCheck your storage subdirectory and naming." \
+                 "\nLast checked path: $STORAGE_PATH"
+    fi
+    STORAGE_FILE="$STORAGE_PATH"
+elif [[ ! -f "$STORAGE_FILE" ]]; then
+    errorLog "Could not find storage table file at path $STORAGE_FILE."
+fi
 
-# interactively selects installation target and assigns to var DRIVE
+# read storage file into array, stripping comments and merging escaped
+# newlines into single lines
+STORAGE_FILE_DATA=(${(f)"$(<$STORAGE_FILE)"})
+for _line in "${(@)STORAGE_FILE_DATA}";
+do
+    # trim comments, skip blank lines
+    if [[ -n ${_line::=${_line//\#*}} && ! "$_line" =~ "^[[:space:]]*$" ]];
+    then
+        if [[ "${_line[-1]}" == \\ ]]; then
+            _prev_line="$_line[1,-2]"
+        else
+            STORAGE_DATA=(${(@)STORAGE_DATA:-} "${_prev_line:-}$_line")
+            prev_line=""
+        fi
+    fi
+done
 
-selectInstallTarget DRIVE
-notifySection "Installation to $DRIVE beginning..."
-
-:<< \
------------------------------------------------------------------------
-READ & PARSE STORAGE TABLE
------------------------------------------------------------------------
-
-# location of storage table file, taken from manifest variable
-STORAGE_TABLE_FILEPATH="${SCRIPT_PATH}/storage/${CONFIG[STORAGE]}"
+:""<< \
+-------------------------------------------------------------------------------
+Processing storage table values
+-------------------------------------------------------------------------------
 
 # note use of 'e' expansion flag to parse variables like $RAM
-STORAGE_TABLE=("${(@ef)$(egrep -v "^#|^$" "${STORAGE_TABLE_FILEPATH}")}")
 
-extractFieldNames   STORAGE_TABLE STORAGE_FIELD_NAMES
-extractFieldValues  STORAGE_TABLE STORAGE_FIELD_VALUES
-parseTableToRecords STORAGE_FIELD_VALUES \
-                    STORAGE_FIELD_NAMES \
-                    NUM_STORAGE_RECORDS \
-                    STORAGE_RECORDS
+zmodload zsh/zutil
+unset STORAGE; typeset -A STORAGE
+BOOLEAN_OPT_ARRAYS=(
+    BOOTABLE
+    NOCLOBBER
+    )
+SCALAR_OPT_ARRAYS=(
+    CODE
+    DEVPATH
+    FSTYPE
+    LABEL
+    MOUNTPOINT
+    MOUNTOPTS
+    SIZE
+    )
+eval "typeset -a $BOOLEAN_OPT_ARRAYS $SCALAR_OPT_ARRAYS"
 
-# If parseTableToRecords found a mismatch in the table formatting
-# then it throws an error. Handle it here.
-if (( $? > 0 )); then
-    print "\n\nERROR: Failed to parse storage table; check table format."
-    exit
-fi
+# this function handles the pseudo commands like:
+#     drive
+#         partition --label "MyLabel"
+#         partition --label "AnotherPartition"
+# from the storage stable file
+_parse_storage_item () {
+
+    # increment index
+    typeset -g ITEMINDEX=+1
+
+    # make sure storage is set
+    typeset -gA STORAGE
+
+    # handle variations on allowed options
+    zmodload zsh/zutil
+    zparseopts -D -E \
+    b::-=BOOTABLE -boot::-=BOOTABLE -bootable::-=BOOTABLE \
+    n::-=NOCLOBBER -noclobber::-=NOCLOBBER \
+    c:=CODE -code:=CODE \
+    d:=DEVPATH p:=DEVPATH -path:=DEVPATH \
+        -device:=DEVPATH -devpath:=DEVPATH \
+    f:=FSTYPE -fs:=FSTYPE -fstype:=FSTYPE -filesystem:=FSTYPE \
+    i:=INDEX -id:=INDEX -idx:=INDEX -index:=INDEX \
+    l:=LABEL -label:=LABEL \
+    m:=MOUNTPOINT -mount:=MOUNTPOINT -mountpoint:=MOUNTPOINT \
+    -null=NULL \
+    o:=MOUNTOPTS -options:=MOUNTOPTS \
+        -mountopts:=MOUNTOPTS -mountoptions:=MOUNTOPTS \
+    s:=SIZE -size:=SIZE \
+    -sub:=SUBSCRIPT -subscript:=SUBSCRIPT \
+    t:=TYPE -type:=TYPE
+
+    typeset _subscript
+    _subscript="${SUBSCRIPT[2]:-}${SUBSCRIPT[2]:+,}"
+    _subscript="${(U)_subscript}${(U)TYPE[2]}${INDEX[2]:+_}${INDEX[2]}"
+
+    # assign values to indexed storage item parameters
+    # (scalar values)
+    for _optname in $SCALAR_OPT_ARRAYS
+    do
+        if [[ -n "${(P)_optname:-}" ]]
+        then
+            eval _optvalue'="${${'$_optname'[2]:-}#=}"'
+            STORAGE[${_subscript},$_optname]="$_optvalue"
+        fi
+    done
+
+    # assign values to indexed storage item parameters
+    # (boolean values)
+    for _optname in $BOOLEAN_OPT_ARRAYS
+    do
+        if [[ -n "${(P)_optname:-}" && ! "${(LP)_optname:-}" =~ ".*false" ]]
+        then
+            STORAGE[${_subscript},$_optname]=true
+        fi
+    done
+
+    # create a null entry for testing so we know this item exists
+    # (required in case item has no other parameters)
+    STORAGE[${_subscript},EXISTS]=true
+
+    if [[ -n "$@" ]]; then
+        errorLog "Unknown storage options: $@" \
+                 "\nCheck for correct spelling," \
+                 "formatting, option dashes, etc."
+    fi
+
+    }
+
+# maketree iterates over the storage file data pseudo-commands and is
+# responsible for creating the correct array subscript and numbering
+# peers (partition 1, drive 2, etc.)
+_make_tree () {
+
+    # _opts contains the arguments passed to this function
+    # _level is typeset here to make it local to all recursive calls
+    # without this typeset, it is local to the function but exports itself
+    # to subsequent calls
+    # _index is the peer level item index (e.g. drive 1, drive 2)
+    typeset -A _opts
+    typeset _head _tail _level _subscript _payload _prev_type _prev_index
+    typeset -i _index=0
+
+    # get the currently being processed indent level and subscript if being
+    # called recursively, or set defaults
+    zmodload zsh/zutil
+    zparseopts -D -E -A _opts -level: -subscript:
+    _level="${${_opts[--level]:-0}#=}"
+    _subscript="${${_opts[--subscript]:-}#=}"
+    _payload="${${_opts[--payload]:-}#=}"
+
+    # initialize payload (a global common to all recursive calls)
+    # parse remaining options in such a way that we handle both incoming
+    # multiple line, single argument strings and multiple single line arrays
+    (( ${+PAYLOAD} )) || {
+        typeset -ag PAYLOAD;
+        for _item in $@; do PAYLOAD=(${(@)PAYLOAD:-} ${(f)_item}); done;
+        # reset level to initial item in case the entire block of storage
+        # items has been indendent for some reason
+        _level="${#${${(@)PAYLOAD[1]:-}}%%[^[:space:]]*}"
+        }
+
+    while (( ${#PAYLOAD} )); do
+        # head and tail the payload
+        # (--null is just to make sure we can pull out a single word for
+        # the subscript later on... a silly hack, probably a better way
+        # using a different zsh expansion)
+        _head=(${(@)PAYLOAD[1]:-} --null); _tail=(${(@)PAYLOAD[2,-1]:-})
+
+        # determine the indendation level
+        _head_level="${#${_head}%%[^[:space:]]*}"
+
+        if (( $_head_level > $_level )); then
+            # payload head is child of the current _level value, so recurse
+            _make_tree --level $_head_level \
+            --subscript "${_subscript}${_subscript:+,}${_prev_type}_${_index}"
+
+        elif (( $_head_level == $_level )); then
+            # Payload head is peer of the current level so we execute it
+            # as a pseudo command that processes its options into array
+            # (we also strip whitespace from head for cleaner debug
+            # output). For example, the initial line of a payload should be
+            # "drive ..." and the initial level will be 0, so 
+            _index+=1
+            eval "_parse_storage_item --type ${(z)_head}" \
+                 "--index $_index --subscript \"$_subscript\""
+            _prev_type="${${(ps: :)${_head}}[1]}"
+            _prev_index="${_index}"
+            PAYLOAD=(${(@)_tail})
+
+        elif (( $_head_level < $_level )); then
+            # payload head is superior to current level, so return from
+            # recursive call until we get back to a peer level
+            return 0
+
+        fi
+    done
+
+    }
+
+_make_tree $STORAGE_DATA
+
+# print all existing items in storage array
+print -l ${(o)${(k)STORAGE[(I)*EXISTS]}%,EXISTS}
+
+exit
+
+:<< \
+SECTION
+complianceCheck
+    each item type has a series of compliance checks
+parse all items
+    need to check to see hwat the children/parents are of each item
+
+
+compliance[drive]=(
+must have at least one child of type partition or fsype btrfs
+if has path set, must prompt for noclobber
+if has path set, must exist
+)
+
+compliance[part]=(
+parent must be drive
+)
+
+parsentry () {
+
+}
+alias drive="scanEntry"
+etc.
+
+
+scanPeers () {
+}
+
+summarizeChildren
+SECTION
+
+source $STORAGE_FILE;
+
+print ">>>>>"
+print -l "${(kv)STORAGE}"
+print ">>>>>"
+
 
 # Ordered list of mounts for use in later loops.
 # Useful in particular so that we have a naturally ordered list
 # of mounts from / on down.
 MOUNT_POINTS=(${(vo)STORAGE_RECORDS[(I)*,MOUNT_POINT]})
 
-:<< \
------------------------------------------------------------------------
-PROCESS STORAGE TABLE DATA
------------------------------------------------------------------------
+:""<< \
+-------------------------------------------------------------------------------
+Selecting target install drive
+-------------------------------------------------------------------------------
+# Interactively selects installation target and assigns to var DRIVE
 
-# Assemble install paths
+# Create list of drives and remove mounted drives from list
+typeset -a drives
+drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+debugLog "Full list of drives: $drives"
+
+# check if device or child has an existing mountpoint and remove from drives
+# array if so
+for drive in $drives; do
+    { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $drive)" ]] \
+      || mount | grep $drive; } && drives=("${(@)drives:#$drive}") || :
+done
+debugLog "List of drives with no mountpoint: $drives"
+
+# User selects drive for install
+userQuit () { printLog "\nUser selected quit."; exit; }
+local CONFIRM="" SELECTED="" i=0
+while [[ ! $CONFIRM =~ [Yy] ]]; do
+
+    # list drives
+    printLog "Available unmounted drives for installation:\n"
+	for drive in $drives; do
+        alertLog "[$(( i += 1))] $drive ($(/usr/bin/lsblk -dno SIZE $drive))"
+    done
+
+    # Pick drive or quit
+	queryLog "\nPlease enter the number of the drive you wish to install to," \
+             "or 'q' to quit: (1$((($i > 1)) && queryLog "-$i")/q) "
+	while [[ -z $SELECTED || ! $SELECTED =~ [1-$i] && ! ${(L)SELECTED} == q ]]
+    do
+        queryLog "\b \b"
+        read -k 1 SELECTED || : # read returns an error code at EOF; ignore it
+    done
+    [[ $SELECTED != "q" ]] || userQuit
+
+    # Identify as SSD or standard
+	queryLog "\nIs $drives[$SELECTED] an SSD? (y/N):"
+    read -k SSD || :; [[ ${(L)SSD} == y ]] && SSD="" || unset SSD; echo
+
+    # Summarize and confirm
+	alertLog "\n\nYou have selected $drives[$SELECTED] for"\
+             "COMPLETE ERASURE, and identified it as ${SSD-NOT }an SSD."
+    queryLog "Enter'y' to erase, 'n' to make changes, or 'q' to quit: (y/N/q) "
+    read -k CONFIRM ||:; [[ ${(L)CONFIRM} != "q" ]] || userQuit
+done
+
+DRIVE=$drives[$SELECTED]
+
+alertLog "Installation to $DRIVE beginning..."
+
+exit
+
+:""<< \
+-------------------------------------------------------------------------------
+Assembling installation paths on target drive
+-------------------------------------------------------------------------------
 # Assign the parent device/storage container path to it's children
 # The table is positionally semantic, i.e. order matters though
 # only for the assignment of /dev/sdx# partition numbers
@@ -317,14 +491,22 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
 done
 
 :<< \
-'-----------------------------------------------------------------------'
-DISK PREPARATION - DESTRUCTIVE
------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+Child/Parent storage functions
+-------------------------------------------------------------------------------
+phys,erase,luks
+phys,erase,btrfs
+
 
 :<< \
-'-----------------------------------------------------------------------'
+-------------------------------------------------------------------------------
+DESTRUCTION FOLLOWS
+-------------------------------------------------------------------------------
+
+:<< \
+-------------------------------------------------------------------------------
 DEBUG for second pass
------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 # DEBUGGING - turn off active swap
 swapoff -a
 
@@ -342,9 +524,9 @@ storageGeneratePartitioningCommandForDrive _part_command $DRIVE
 eval "$_part_command"
 
 :<< \
-'-----------------------------------------------------------------------'
+-------------------------------------------------------------------------------
 ENCRYPT STORAGE
------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 
 # Check if we need encryption
 ENCRYPTION=false
@@ -382,9 +564,9 @@ if [[ $ENCRYPTION == true ]]; then
 fi
 
 :<< \
-'-----------------------------------------------------------------------'
+-------------------------------------------------------------------------------
 MAKE FILESYSTEMS
------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 
 # FIRST PASS: isn't luks, doesn't have "child of"
 # (so should be our top level physical partitions)
