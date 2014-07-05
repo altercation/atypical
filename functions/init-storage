@@ -137,7 +137,7 @@ STOROPTS[LUKS,OPEN,SSD]='--allow-discards'
 -------------------------------------------------------------------------------
 Loading & processing atypical storage table file
 -------------------------------------------------------------------------------
-# source remote or create absolute filepath
+# source remote URI or create absolute filepath
 if [[ "$STORAGE_FILE" =~ "(http|ftp)s?:.*" ]]; then
     { curl -#L $STORAGE_FILE -o $TMPSTOR } ioLog \
     && { successLog "Retrieved remote storage table file.";
@@ -167,22 +167,6 @@ elif [[ ! -f "$STORAGE_FILE" ]]; then
     errorLog "Could not find storage table file at path $STORAGE_FILE."
 fi
 
-# read storage file into array, stripping comments and merging escaped
-# newlines into single lines
-STORAGE_FILE_DATA=(${(f)"$(<$STORAGE_FILE)"})
-for _line in "${(@)STORAGE_FILE_DATA}";
-do
-    # trim comments, skip blank lines
-    if [[ -n ${_line::=${_line//\#*}} && ! "$_line" =~ "^[[:space:]]*$" ]];
-    then
-        if [[ "${_line[-1]}" == \\ ]]; then
-            _prev_line="$_line[1,-2]"
-        else
-            STORAGE_DATA=(${(@)STORAGE_DATA:-} "${_prev_line:-}$_line")
-            prev_line=""
-        fi
-    fi
-done
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -192,11 +176,43 @@ Processing storage table values
 # note use of 'e' expansion flag to parse variables like $RAM
 
 zmodload zsh/zutil
+
 unset STORAGE; typeset -A STORAGE
+
+# only these storage types allowed
+VALID_STORAGE_TYPES=(
+    DRIVE
+    PARTITION
+    LOGICAL
+    ENCRYPTION
+    FILESYSTEM
+    SUBVOLUME
+    )
+
+typeset -A COMPLIANCE
+COMPLIANCE[CHILD_OF,DRIVE]="
+    [[ _type == partition ]] || \
+    [[ _type == encryption ]] || \
+    [[ _type == logical ]] || \
+    [[ _type == filesystem && _filesystemtype == btrfs ]] || \
+    [[ _type == filesystem && _filesystemtype == ext4 ]] "
+COMPLIANCE[CHILD_OF,PARTITION]="
+    [[ _type == encryption ]] || \
+    [[ _type == filesystem ]] "
+COMPLIANCE[CHILD_OF,FILESYSTEM]="
+    [[ _type == subvolume  ]] && \
+    [[ _filesystemtype == btrfs ]] && \
+    [[ _mountpoint is in parent mount point ]] "
+COMPLIANCE[CHILD_OF,SUBVOLUME]="
+    [[ _type == subvolume  && _filesystemtype == btrfs ]] "
+
+# storage items boolean option array names
 BOOLEAN_OPT_ARRAYS=(
     BOOTABLE
     NOCLOBBER
     )
+
+# storage items scalar option array names
 SCALAR_OPT_ARRAYS=(
     CODE
     DEVPATH
@@ -205,14 +221,17 @@ SCALAR_OPT_ARRAYS=(
     MOUNTPOINT
     MOUNTOPTS
     SIZE
+    TYPE
     )
+
 eval "typeset -a $BOOLEAN_OPT_ARRAYS $SCALAR_OPT_ARRAYS"
 
-# this function handles the pseudo commands like:
+# _parse_storage_item handles the pseudo commands such as:
 #     drive
 #         partition --label "MyLabel"
 #         partition --label "AnotherPartition"
-# from the storage stable file
+# from the storage stable file, parsing them into array
+# values.
 _parse_storage_item () {
 
     # increment index
@@ -224,25 +243,28 @@ _parse_storage_item () {
     # handle variations on allowed options
     zmodload zsh/zutil
     zparseopts -D -E \
-    b::-=BOOTABLE -boot::-=BOOTABLE -bootable::-=BOOTABLE \
-    n::-=NOCLOBBER -noclobber::-=NOCLOBBER \
-    c:=CODE -code:=CODE \
-    d:=DEVPATH p:=DEVPATH -path:=DEVPATH \
-        -device:=DEVPATH -devpath:=DEVPATH \
-    f:=FSTYPE -fs:=FSTYPE -fstype:=FSTYPE -filesystem:=FSTYPE \
-    i:=INDEX -id:=INDEX -idx:=INDEX -index:=INDEX \
-    l:=LABEL -label:=LABEL \
-    m:=MOUNTPOINT -mount:=MOUNTPOINT -mountpoint:=MOUNTPOINT \
-    -null=NULL \
-    o:=MOUNTOPTS -options:=MOUNTOPTS \
-        -mountopts:=MOUNTOPTS -mountoptions:=MOUNTOPTS \
-    s:=SIZE -size:=SIZE \
-    -sub:=SUBSCRIPT -subscript:=SUBSCRIPT \
-    t:=TYPE -type:=TYPE
+        b::-=BOOTABLE -boot::-=BOOTABLE -bootable::-=BOOTABLE \
+        n::-=NOCLOBBER -noclobber::-=NOCLOBBER \
+        c:=CODE -code:=CODE \
+        d:=DEVPATH p:=DEVPATH -path:=DEVPATH \
+            -device:=DEVPATH -devpath:=DEVPATH \
+        f:=FSTYPE -fs:=FSTYPE -fstype:=FSTYPE -filesystem:=FSTYPE \
+        i:=INDEX -id:=INDEX -idx:=INDEX -index:=INDEX \
+        l:=LABEL -label:=LABEL \
+        m:=MOUNTPOINT -mount:=MOUNTPOINT -mountpoint:=MOUNTPOINT \
+        -null=NULL \
+        o:=MOUNTOPTS -options:=MOUNTOPTS \
+            -mountopts:=MOUNTOPTS -mountoptions:=MOUNTOPTS \
+        s:=SIZE -size:=SIZE \
+            -sub:=SUBSCRIPT -subscript:=SUBSCRIPT \
+        t:=TYPE -type:=TYPE
 
-    typeset _subscript
-    _subscript="${SUBSCRIPT[2]:-}${SUBSCRIPT[2]:+,}"
-    _subscript="${(U)_subscript}${(U)TYPE[2]}${INDEX[2]:+_}${INDEX[2]}"
+    # _subh (subscript, head)
+    # _subt (subscript, tail)
+    typeset _sub
+    _subh="${(U)SUBSCRIPT[2]:-}"
+    _subt="${(U)TYPE[2]}${INDEX[2]:+_}${INDEX[2]}"
+    _subht="${_subh}${_subh:+,}${_subt}"
 
     # assign values to indexed storage item parameters
     # (scalar values)
@@ -250,8 +272,8 @@ _parse_storage_item () {
     do
         if [[ -n "${(P)_optname:-}" ]]
         then
-            eval _optvalue'="${${'$_optname'[2]:-}#=}"'
-            STORAGE[${_subscript},$_optname]="$_optvalue"
+            eval _${(U)_optname}'="${${'$_optname'[2]:-}#=}"'
+            STORAGE[${_subht},${(U)_optname}]="${(P)${:-_${(U)_optname}}}"
         fi
     done
 
@@ -261,13 +283,22 @@ _parse_storage_item () {
     do
         if [[ -n "${(P)_optname:-}" && ! "${(LP)_optname:-}" =~ ".*false" ]]
         then
-            STORAGE[${_subscript},$_optname]=true
+            eval _${(U)_optname}'=true'
+            STORAGE[${_subht},${(U)_optname}]=true
         fi
     done
 
     # create a null entry for testing so we know this item exists
     # (required in case item has no other parameters)
-    STORAGE[${_subscript},EXISTS]=true
+    STORAGE[${_subht},EXISTS]=true
+
+    # add child to parent subscript entry
+    # TODO: may not be necessary (could just write a simple helper
+    # lookup function to return same data...
+    if [[ -n "${_subh:-}" ]]; then
+        #STORAGE[${_subh}${_subh:+,}CHILDREN]="${STORAGE[${_subh}${_subh:+,}CHILDREN]:-} ${(U)TYPE[2]}${INDEX[2]:+_}${INDEX[2]}"
+        :
+    fi
 
     if [[ -n "$@" ]]; then
         errorLog "Unknown storage options: $@" \
@@ -277,40 +308,203 @@ _parse_storage_item () {
 
     }
 
-# maketree iterates over the storage file data pseudo-commands and is
+_generate_storage_commands_from_file () {
+    # _opts contains the arguments passed to this function
+
+    typeset -A _opts
+    zmodload zsh/zutil
+    zparseopts -D -E -A _opts -inputfilepath: -outputarrayname:
+    _inputfilepath="${${_opts[--inputfilepath]:-}#=}"
+    _outputarrayname="${${_opts[--outputarrayname]:-}#=}"
+
+    # initialization
+    if [[ -n "$_inputfilepath" && -n "$_outputarrayname" ]]
+    then
+
+        typeset -ag PAYLOAD STORAGE_CMDS $_outputarrayname
+        typeset -a STORAGE_FILE_DATA
+        typeset -Ag CHILDREN
+
+        # read storage file into array
+        STORAGE_FILE_RAW_DATA=(${(f)"$(<$_inputfilepath)"})
+
+        # strip comments (full or partial)
+        # merge escaped newlines into single lines
+        for _line in "${(@)STORAGE_FILE_RAW_DATA}";
+        do
+
+            # if this line isn't blank or a comment, continue to process
+            if [[ -n "${_line::=${_line//\#*}}" \
+               && ! "$_line" =~ "^[[:space:]]*$" ]]; then
+
+                # if this line ends in an escaped newline, prep to merge with next
+                if [[ "${_line[-1]}" == \\ ]]; then
+                    # set as previous line (and append if we have escaped
+                    # newlines on multiple sequential lines)
+                    _prev_line="${_prev_line:-}$_line[1,-2]"
+
+                # otherwise assign line to payload (merging with any prev line)
+                else
+                    _line="${_prev_line:-}$_line"
+                    _indent="${#${_line}%%[^[:space:]]*}"
+                    PAYLOAD+=("--type ${_line:${_indent}:${#_line}} --item_indent $_indent")
+                    _prev_line=""
+                fi
+            fi
+        done
+    elif [[ -n "$_inputfilepath" || -n "$_outputarrayname" ]]; then
+        errorLog "$0 requires both a filepath and output arrayname."
+    fi
+
+    # _build_tree eats PAYLOAD line by line (inner function here since
+    # we are doing things with state internal to the _gen function
+    _initialize_tree_values () {
+        typeset -i _item_index=0 # sequence index for siblings (partition 1, 2, etc.)
+        while (( ${#PAYLOAD} )); do
+            # head and tail the payload
+            # (--null is just to make sure we can pull out a single word for
+            # the subscript later on... a silly hack, probably a better way
+            # using a different zsh expansion)
+            _head="${(@)PAYLOAD[1]:-}";
+            eval set -- "$@ $_head"
+            _parse_opts=(item_indent section_indent base_indent parent_index)
+            #for _opt in "${(@)_parse_opts}"
+            #do
+            #    eval "zparseopts -E -$_opt:=_$_opt"
+            #    eval "_$_opt[1]=()"
+            #done
+            zparseopts -E -item_indent:=_item_indent \
+                          -section_indent:=_section_indent \
+                          -base_indent:=_base_indent \
+                          -parent_index:=_parent_index
+            _item_indent[1]=()
+            _section_indent[1]=()
+            _base_indent[1]=()
+            _parent_index[1]=()
+
+            print "SECTION: $_section_indent    ITEM: $_item_indent"
+            # item is a peer of the current section
+            if (( $_item_indent == ${_section_indent:-$_base_indent} ))
+            then
+                _item_index+=1
+                _full_index="${_parent_index:-}${_parent_index:+,}${_item_index}"
+                STORAGE[$_full_index]="$_head"
+                # trim payload for next go round
+                PAYLOAD[1]=()
+
+            # item is a child of the current section
+            elif (( $_item_indent > ${_section_indent:-$_base_indent} ))
+            then
+                _full_index="${_parent_index:-}${_parent_index:+,}${_item_index}"
+                $0  --base_indent "$_base_indent" \
+                    --section_indent "$_item_indent" \
+                    --parent_index "$_full_index"
+                    
+                # now get the immediate children of this level
+
+            elif (( $_item_indent < ${_section_indent:-$_base_indent} ))
+            then
+
+                # payload head is superior to current level, so return from
+                # recursive call until we get back to a peer level
+                return 0
+
+            fi
+        done
+        }
+
+    _initialize_tree_values --base_indent "${#${PAYLOAD[1]}%%[^[:space:]]*}"
+
+}
+
+:<< 'EOF'
+STORAGE[1,ARGS]="--type drive --index 1 --children '1,1 1,2 1,3' --childtypes 'part part encryption'"
+STORAGE[1,TYPE]="drive"
+STORAGE[1,CHILDREN,INDEXES]="1,1 1,2 1,3"
+STORAGE[1,CHILDREN,TYPES]="part part encryption"
+
+STORAGE[1,1,1]="type=drive index=1" 
+EOF
+
+_generate_storage_commands_from_file \
+        --inputfilepath $STORAGE_FILE \
+        --outputarrayname STORAGE_COMMANDS 
+for k in ${(ok)STORAGE[@]}; do
+        print "$k: ${STORAGE[$k]}"
+done
+
+exit
+
+# _make_storage_commands_from_file
+#
+# iterates over the storage file data pseudo-commands and is
 # responsible for creating the correct array subscript and numbering
 # peers (partition 1, drive 2, etc.)
-_make_tree () {
+_make_storage_commands_from_file () {
 
     # _opts contains the arguments passed to this function
     # _level is typeset here to make it local to all recursive calls
     # without this typeset, it is local to the function but exports itself
     # to subsequent calls
     # _index is the peer level item index (e.g. drive 1, drive 2)
+
     typeset -A _opts
-    typeset _head _tail _level _subscript _payload _prev_type _prev_index
+    typeset _head _tail _level _parent _payload _prev_type _prev_index _filename
     typeset -i _index=0
+    typeset -i _seq
+    typeset -g _outputarrayname
 
     # get the currently being processed indent level and subscript if being
     # called recursively, or set defaults
+
     zmodload zsh/zutil
-    zparseopts -D -E -A _opts -level: -subscript:
+    zparseopts -D -E -A _opts -level: -parent: -filename: -outputarrayname:
     _level="${${_opts[--level]:-0}#=}"
-    _subscript="${${_opts[--subscript]:-}#=}"
+    _seq="${${_opts[--seq]:-0}#=}"
+    _filename="${${_opts[--filename]:-}#=}"
+    _outputarrayname="${${_opts[--outputarrayname]:-}#=}"
+    _parent="${${_opts[--parent]:-}#=}"
     _payload="${${_opts[--payload]:-}#=}"
 
     # initialize payload (a global common to all recursive calls)
     # parse remaining options in such a way that we handle both incoming
     # multiple line, single argument strings and multiple single line arrays
+    #
+    # PAYLOAD is the incoming, sanitized storage file data (sanitized only
+    # by merging escaped newlines and stripping comments/blank lines)
+    # STORAGE_CMDS is the array of the to-be-executed pseudo commands
+    # CHILDREN is an array of children values for each command, used to
+    # check basic compliance (a drive can't be a child of a drive, etc.)
+
+    # begin one time initialization
     (( ${+PAYLOAD} )) || {
-        typeset -ag PAYLOAD;
+        typeset -ag PAYLOAD STORAGE_CMDS STORAGE_FILE_DATA $_outputarrayname
+        typset -Ag CHILDREN
+        # read storage file into array, stripping comments and merging escaped
+        # newlines into single lines
+        STORAGE_FILE_RAW_DATA=(${(f)"$(<$_filename)"})
+        for _line in "${(@)STORAGE_FILE_RAW_DATA}";
+        do
+            # trim comments, skip blank lines
+            if [[ -n ${_line::=${_line//\#*}} && ! "$_line" =~ "^[[:space:]]*$" ]];
+            then
+                if [[ "${_line[-1]}" == \\ ]]; then
+                    _prev_line="$_line[1,-2]"
+                else
+                    PAYLOAD=(${(@)STORAGE_DATA:-} "${_prev_line:-}$_line")
+                    _prev_line=""
+                fi
+            fi
+        done
         for _item in $@; do PAYLOAD=(${(@)PAYLOAD:-} ${(f)_item}); done;
         # reset level to initial item in case the entire block of storage
         # items has been indendent for some reason
         _level="${#${${(@)PAYLOAD[1]:-}}%%[^[:space:]]*}"
         }
 
+    # eat up the payload line by line, converting it to pseudo commands
     while (( ${#PAYLOAD} )); do
+
         # head and tail the payload
         # (--null is just to make sure we can pull out a single word for
         # the subscript later on... a silly hack, probably a better way
@@ -320,25 +514,46 @@ _make_tree () {
         # determine the indendation level
         _head_level="${#${_head}%%[^[:space:]]*}"
 
-        if (( $_head_level > $_level )); then
-            # payload head is child of the current _level value, so recurse
-            _make_tree --level $_head_level \
-            --subscript "${_subscript}${_subscript:+,}${_prev_type}_${_index}"
+        if (( $_head_level == $_level ))
+        then
 
-        elif (( $_head_level == $_level )); then
             # Payload head is peer of the current level so we execute it
             # as a pseudo command that processes its options into array
             # (we also strip whitespace from head for cleaner debug
             # output). For example, the initial line of a payload should be
             # "drive ..." and the initial level will be 0, so 
+
             _index+=1
-            eval "_parse_storage_item --type ${(z)_head}" \
-                 "--index $_index --subscript \"$_subscript\""
+
+            #eval "_parse_storage_item --type ${(z)_head}" \
+            #     "--index $_index --parent \"$_parent\""
+
+            _cmd="_parse_storage_item --type ${(z)_head}"
+            _cmd+=" --index $_index --parent \"$_parent\""
+
+            STORAGE_CMDS=("${(@)STORAGE_CMDS:-}" "$_cmd")
+
             _prev_type="${${(ps: :)${_head}}[1]}"
             _prev_index="${_index}"
             PAYLOAD=(${(@)_tail})
+            (( ${_recursion} > 0 )) && CHILDREN[${_recursion:-}]+=(
+            "--childtype=${_prev_type}"
+            ) 
 
+        elif (( $_head_level > $_level ))
+        then
+
+            # payload head is child of the current _level value, so recurse
+            _make_tree --level $_head_level \
+            --parent "${_parent}${_parent:+,}${_prev_type}_${_index}"
+
+            
+            # now get the immediate children of this level
+
+
+            
         elif (( $_head_level < $_level )); then
+
             # payload head is superior to current level, so return from
             # recursive call until we get back to a peer level
             return 0
@@ -348,10 +563,32 @@ _make_tree () {
 
     }
 
-_make_tree $STORAGE_DATA
+_compliance_check () {
+:
+}
 
-# print all existing items in storage array
+_get_children_of () {
+    print -l ${(o)${(k)STORAGE[(I)${1}*EXISTS]}%,EXISTS}
+}
+
+_get_parent_of () {
+:
+}
+
+
+#_make_tree $STORAGE_DATA
+_make_commands_from_file --filename $STORAGE_FILE --outputarrayname STORAGE_CMDS
+print -l "${(@)STORAGE_CMDS}"
+
+_compliance_check STORAGE
+
+#_get_children_of DRIVE_1
+#exit
+
+print all existing items in storage array
 print -l ${(o)${(k)STORAGE[(I)*EXISTS]}%,EXISTS}
+#print -l ${(o)${(kv)STORAGE[(I)*CHILDREN]}}
+exit
 
 exit
 
