@@ -1,0 +1,30 @@
+:<< \
+-------------------------------------------------------------------------------
+Process command line options
+-------------------------------------------------------------------------------
+[[ -n "$(typeset SCRIPTOPT)" ]] || {
+typeset -A SCRIPTOPT
+optspec=":dhsvx-:"
+while getopts "$optspec" optchar; do
+    if [[ "${optchar}" == "-" ]]; then
+            case "${OPTARG}" in
+                debug|help|output|sim*|verbose|xtrace) optchar=${OPTARG:0:1} ;;
+                *) [ "$OPTERR" = 1 ] && [ "${optspec:0:1}" != ":" ] && echo "Unknown option --${OPTARG}" >&2 ;;
+            esac
+    fi
+    case "${optchar}" in
+        d) SCRIPTOPT[DEBUG]=true; DEBUG=true ;;
+        h) echo "$USAGE"; exit 2 ;;
+        o) SCRIPTOPT[OUTPUT]=true; SIM=true ;;
+        s) SCRIPTOPT[SIM]=true; SIM=true ;;
+        v) SCRIPTOPT[VERBOSE]=true; VERBOSE=true ;;
+        x) SCRIPTOPT[XTRACE]=true; XTRACE=true ;;
+        *)
+            if [ "$OPTERR" != 1 ] || [ "${optspec:0:1}" = ":" ]; then
+                echo "Non-option argument: '-${OPTARG}'" >&2; exit 1;
+            fi
+            ;;
+    esac
+done
+}
+shift $((OPTIND-1)) # start where getopts left off

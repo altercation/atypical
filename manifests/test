@@ -20,8 +20,8 @@ SAMPLE MANIFEST
 # Leave this unassigned or empty to use the default Atypical scripts
 # only.
 
-CUSTOM_ROOT="https://github.com/altercation/atypical.git"
-STORAGE[TABLE]="encrypt_btrfs_subvols"
+#CUSTOM_ROOT="https://github.com/altercation/atypical.git"
+STORAGE="encrypt_btrfs_subvols"
 
 :<< \
 -----------------------------------------------------------------------

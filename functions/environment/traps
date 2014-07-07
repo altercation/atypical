@@ -12,7 +12,7 @@ cleanup  () {
     }
 
 # list trap to keep it from handling subshell exits
-trap ' print "\nEXITING INSTALLER\n"; cleanup;' EXIT
+trap 'cleanup;' EXIT
 
 # function trap to handle subshell errors
 TRAPZERR () {

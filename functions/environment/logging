@@ -23,16 +23,19 @@ teeLog () { [[ "${1:-}" == "-w" ]] && w="${(r:80::--:):-}" && shift || w=""
     m=("${@:-$(while read line; do print $line; done)}");
     print -- "${w:-}${w:+\n}${(@F)m:-}${w:+\n}${w:-}" >&1 >&$LOGFD;} }
 defined progressLog || {
-    progressLog () { print $( ${DEBUG:-false} \
+    progressLog () { print $( ${SCRIPTOPT[DEBUG]:-false} \
                      || print -- "-n") -- "${@:-}..." >&1 >&$LOGFD; } }
+defined queryLog || { queryLog () { print -n -- "${@:-}" >&1 >&$LOGFD; } }
 defined printLog || { printLog () { print -- "${@:-}" >&1 >&$LOGFD; } }
 defined errorPrint || { errorPrint () { print -P -- "%F{red}${@:-}%f"; } }
 defined errorlog || { errorLog () { errorPrint "$@" >&1 >&$LOGFD 2>&$LOGFD; return 1; } }
 defined errorlog || { errorLog () { errorPrint "$@" >&1 >&$LOGFD; return 1; } }
 defined successPrint || { successPrint () { print -P -- "%F{green}${@:-}%f"; } }
 defined successlog || { successLog () { successPrint "$@" >&1 >&$LOGFD; } }
+defined alertPrint || { alertPrint () { print -P -- "%F{yellow}${@:-}%f"; } }
+defined alertlog || { alertLog () { alertPrint "$@" >&1 >&$LOGFD; } }
 defined debugLog || {
-    if ${DEBUG:-false}; then
+    if ${SCRIPTOPT[DEBUG]:-false}; then
         debugLog () { print -- "${@:-}" >&1 >&$LOGFD; }
     else
         debugLog () { print -- "${@:-}" >&$LOGFD; }
@@ -43,7 +46,7 @@ defined debugLog || {
 # Without these aliases, the semantic comment style is ignored silently
 # as "just a comment". With these aliases, the semantic comment content
 # is output to the console and logged.
-alias -g  :\'\'='cat >&1 >$LOGFD'
+alias -g  :\'\'='cat >&1 >&$LOGFD'
 alias -g  :\"\"='print -P -- "%B\n${__:=${(r:80::--:):-}}" >&1 >&$LOGFD;
                 { cat; print -P -- "$__%b"; } >&1 >&$LOGFD'
 
@@ -56,6 +59,6 @@ alias -g  :\"\"='print -P -- "%B\n${__:=${(r:80::--:):-}}" >&1 >&$LOGFD;
 #
 # The above braces enclosed list will pass the final error state through
 # ioLog so that it can be trapped or handled afterwards.
-[[ -z ${DEBUG:-} ]] \
+[[ -z ${SCRIPTOPT[DEBUG]:-} ]] \
         && alias ioLog='>&1 >&$LOGFD 2>&$LOGFD' \
         || alias ioLog='>&1 >&$LOGFD 2>&1'

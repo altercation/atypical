@@ -1,4 +1,4 @@
-#!/usr/bin/zsh
+#!/usr/bin/env zsh
 
 typeset -r USAGE="
 -------------------------------------------------------------------------------
@@ -36,12 +36,13 @@ See manifest subdirectory for manifest file content details.
 "
 :<< \
 -------------------------------------------------------------------------------
-Frontmatter
+Script Environment
 -------------------------------------------------------------------------------
 # script absolute path, name, and load of common script env, opts, functions
 SCRIPT_NAME="${${SCRIPT_PATH:=$(readlink -f $0)}:t}"
 SCRIPT_ROOT="${SCRIPT_PATH:h}"
-for _common in ${SCRIPT_ROOT}/functions/common/*; do source ${_common}; done;
+FUNC_ROOT="${SCRIPT_ROOT}/functions"
+for _fm in ${FUNC_ROOT}/environment/*; do source ${_fm}; done;
 
 # root?
 true && :"" <<< "Beginning $SCRIPT_NAME installer" \
@@ -54,10 +55,14 @@ true && :"" <<< "Beginning $SCRIPT_NAME installer" \
 Setting up installer environment
 -------------------------------------------------------------------------------
 # initial declarations
-typeset -Ax SCRIPT DIR FUNC CONFIG INSTALLER USER STORAGE
+typeset -Ax SCRIPT DIR FUNC CONFIG INSTALLER USER
 
 # default value for new system install mount point, chroot
 MOUNTROOT="/mnt"
+
+# used only if we need to write out temporary storage table data
+# such as from a remote url or direct manifest storage data
+TMPSTOR=$TMPDIR/storage
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -65,7 +70,7 @@ Loading & processing atypical manifest file
 -------------------------------------------------------------------------------
 # If the manifest file hasn't been specified as arg 1 on the command line, fail
 [[ -n ${MANIFEST:=${1:-}} ]] \
-    || { errorPrint "NO MANIFEST SPECIFIED" && usage 1; }
+    || { errorLog "No manifest specified." || usage 1; }
 
 # source remote or create absolute filepath
 if [[ "$MANIFEST" =~ "(http|ftp)s?:.*" ]]; then
@@ -98,24 +103,6 @@ fi
         || { errorLog "Failed." }
     }
 
-# If a custom root has been set in the manifest and successfully cloned, its
-# subdirectories are scanned and all files added as autoload functions that
-# take precedence over built-in autoloaded functions. thus any atypical
-# function or installer can (and will) be overridden by a user file of the
-# same name.
-# if [[ "${${SCRIPT[CUSTOM_ROOT]:-}:0:1}" == "/" ]]; then
-#     DATAPATHS[CUSTOM_MANIFESTS]="${SCRIPT[CUSTOM_ROOT]}/manifests"
-#     DATAPATHS[CUSTOM_STORAGE]="${SCRIPT[CUSTOM_ROOT]}/storage"
-#     AUTOPATHS[CUSTOM_FUNCTIONS]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-#     AUTOPATHS[CUSTOM_INSTALLERS_PATH]="${SCRIPT[CUSTOM_ROOT]}/installers"
-#     AUTOPATHS[CUSTOM_USER_PATH]="${SCRIPT[CUSTOM_ROOT]}/scripts"
-#     autoInit "${(@v)AUTOPATHS[(I)CUSTOM*]}" "${SCRIPT[CUSTOM_ROOT]}"
-#     teeLog "Successfully set custom script source as listed in manifest."
-# elif [[ -n "${SCRIPT[CUSTOM_ROOT]:-}" ]]; then
-#     errLog "Failed to source/set new script source as listed in manifest."
-# fi
-# exit
-
 :""<< \
 -------------------------------------------------------------------------------
 Autoloading installer functions
@@ -123,7 +110,7 @@ Autoloading installer functions
 # autoload all functions, custom second so that it is first in line in fpath
 for _root in $SCRIPT_ROOT ${CUSTOM_ROOT:-}; do
     fpath=($_root/{installers,functions,user} "${fpath[@]}")
-    for _func in $_root/{installers,functions,user}/**~common/*(.); do
+    for _func in $_root/{installers,functions,user}/**~environment/*(.); do
         autoload ${_func:t}
     done
 done
@@ -133,63 +120,30 @@ successLog "Loaded installer functions."
 -------------------------------------------------------------------------------
 Preparing storage
 -------------------------------------------------------------------------------
-# expects STORAGE[TABLE] as scalar value, either filename or actual table data
-# check that we have something in the STORAGE[TABLE] value and if we do then
-# convert to array for easy multiline check
-[[ -n "${STORAGE[TABLE]:-}" ]] \
-    && STORAGE_TABLE_DATA=(${(f)STORAGE[TABLE]:-}) \
+# expects STORAGE as scalar value, either filename or actual table data
+# check that we have something in the STORAGE value and if we do then
+# convert to array for easy multiline check.
+#
+# init-storage must be passed a filename or url, so if we have read in actual
+# table data, write it out to a temp file
+#
+# our only check here should be to determine if we have a multiline value which
+# will be assumed is actual storage data. no sanitizing or validity checks are
+# performed in this main script, only in init-storage (if they are implemented)
+
+# is STORAGE set already by the manifest?
+[[ -n "${STORAGE:-}" ]] \
     || errorLog "No storage table data / filename present in manifest."
 
-# single line value, assume is filename for storage table; check & read
-if [[ -z "${STORAGE_TABLE_DATA[2]:-}" ]]; then
+# is it multiline? if so, write it out and set its new value to the temp file
+(( $(wc -l <<< "${STORAGE}") > 1 )) && {
+    print "$STORAGE" > $TMPSTOR \
+        || errorLog "Failed writing temporary storage file to $TMPSTOR"
+    STORAGE=$TMPSTOR
+    }
 
-    # set up file path for custom storage
-    if ${CUSTOM:-false}; then # custom
-        if [[ -f "${STORAGE_FILE::=${CUSTOM_ROOT:-}/storage/${STORAGE_TABLE_DATA}}" ]];
-        then
-            printLog \
-            "Using custom storage table definition: $STORAGE_TABLE_DATA."
-        elif [[ -f "${STORAGE_FILE::=${SCRIPT_ROOT:-}/storage/${STORAGE_TABLE_DATA}}" ]];
-        then
-            printLog \
-            "No custom storage table file named $STORAGE_TABLE_DATA." \
-            "\nUsing default storage table definition at $STORAGE_FILE."
-        else
-            errorLog \
-            "ERROR: No custom storage table file named $STORAGE_TABLE_DATA." \
-            "\nNo matching default storage table definition found in " \
-            "$SCRIPT_ROOT/storage"
-        fi
-    elif [[ -f "${STORAGE_FILE::=${SCRIPT_ROOT:-}/storage/${STORAGE_TABLE_DATA}}" ]];
-    then
-            printLog \
-            "Using default storage table named $STORAGE_TABLE_DATA " \
-            "at $STORAGE_FILE."
-    else
-            errorLog \
-            "No storage table named $STORAGE_TABLE_DATA found " \
-            "in $SCRIPT_ROOT/storage"
-    fi
+init-storage "$STORAGE"
 
-    # write file contents to value, stripping comment lines
-    egrep -v "^#|^$" "${STORAGE_FILE}" > $TMPDIR/STORAGE_TABLE \
-        || errorLog "Failed to read storage file $STORAGE_FILE"
-
-    # if successfully processed, read it into the correct scalar variable
-    STORAGE[TABLE]="$(cat $TMPDIR/STORAGE_TABLE)"
-
-    # cleanup
-    rm $TMPDIR/STORAGE_TABLE &>/dev/null
-
-    # include in log and debug output
-    debugLog "${STORAGE[TABLE]}"
-
-fi
-
-# call atypical's init-storage with actual storage table data
-# (init-storage takes either a file path or table data, but we've normalized
-# to table data here)
-init-storage -s "${STORAGE[TABLE]}"
 exit
 
 :""<< \
