@@ -1,0 +1,1 @@
+print value for key2 is ${${(P)ref}[${${(@kP)ref}[(i)key2]}]}

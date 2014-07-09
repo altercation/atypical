@@ -1,6 +1,6 @@
 # a comment
     # a comment
-drive --devpath /dev/sdy
+drive --devpath /dev/sdy --label "a label for a drive" --bootable --size=100
     # a comment
     partition --label "test"
     partition --label "MyLabel  Has    Weird Spaces" # some comment here

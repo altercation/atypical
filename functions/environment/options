@@ -4,16 +4,17 @@ Process command line options
 -------------------------------------------------------------------------------
 [[ -n "$(typeset SCRIPTOPT)" ]] || {
 typeset -A SCRIPTOPT
-optspec=":dhsvx-:"
+optspec=":dfhsvx-:"
 while getopts "$optspec" optchar; do
     if [[ "${optchar}" == "-" ]]; then
             case "${OPTARG}" in
-                debug|help|output|sim*|verbose|xtrace) optchar=${OPTARG:0:1} ;;
+                debug|force|help|output|sim*|verbose|xtrace) optchar=${OPTARG:0:1} ;;
                 *) [ "$OPTERR" = 1 ] && [ "${optspec:0:1}" != ":" ] && echo "Unknown option --${OPTARG}" >&2 ;;
             esac
     fi
     case "${optchar}" in
         d) SCRIPTOPT[DEBUG]=true; DEBUG=true ;;
+        f) SCRIPTOPT[FORCE]=true; FORCE=true ;;
         h) echo "$USAGE"; exit 2 ;;
         o) SCRIPTOPT[OUTPUT]=true; SIM=true ;;
         s) SCRIPTOPT[SIM]=true; SIM=true ;;
@@ -28,3 +29,20 @@ while getopts "$optspec" optchar; do
 done
 }
 shift $((OPTIND-1)) # start where getopts left off
+
+
+:<< \
+-------------------------------------------------------------------------------
+Options
+-------------------------------------------------------------------------------
+# script options: good habits like no_unset and ensuring we fail out if
+# there are any errors... error handling must be present where "acceptable"
+# error states are anticipated
+setopt ERR_RETURN NO_UNSET GLOBAL_EXPORT EXTENDED_GLOB NULL_GLOB \
+       ${SCRIPTOPT[VERBOSE]:+VERBOSE} ${SCRIPTOPT[XTRACE]:+XTRACE}
+
+:<< \
+-------------------------------------------------------------------------------
+Modules
+-------------------------------------------------------------------------------
+zmodload zsh/zutil

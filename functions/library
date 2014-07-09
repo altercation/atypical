@@ -348,7 +348,7 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     setActiveStorageRecordWithPrefix $_record_index _record
     if [[ -n ${_record_code:-} ]]; then 
 
-        if [[ ${(L)_record_size} == "max" ]]; then
+        if [[ ${(L)_record_size} =~ "^max" ]]; then
         # using maximum available space on drive for this partition
             local _new_cmd="--largest-new=$_record_device_index"
         else

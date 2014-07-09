@@ -1,0 +1,352 @@
+:<< \
+-------------------------------------------------------------------------------
+Storage utility functions
+-------------------------------------------------------------------------------
+# only these storage types allowed
+valueIsInList () {
+    typeset -A _opts
+    zparseopts -D -E -A _opts -value: -list:
+    _value="${${_opts[--value]:-}#=}"
+    _list=(${(ps: :)${_opts[--list]:-}})
+    (( ${_list[(i)$_value]} <= ${#_list} ))
+    }
+
+typeIsValidStorageType () {
+    typeset _type="$1"
+    typeset -A VALID
+    VALID=(TYPES "drive partition logical encryption filesystem subvolume swap")
+    valueIsInList --value $_type --list "${VALID[TYPES]}" && return 0 || \
+        errorLog "\'$_type\' is not a valid storage type."
+    }
+
+typeIsValidChildOf () {
+    typeset _type="$1" _parent_type=$2
+    typeset -A VALID
+    VALID=(
+        TYPES,CHILDREN,DRIVE "partition logical encryption filesystem"
+        TYPES,CHILDREN,PARTITION "logical encryption filesystem swap"
+        TYPES,CHILDREN,ENCRYPTION "logical filesystem swap"
+        TYPES,CHILDREN,FILESYSTEM "subvolume"
+        TYPES,CHILDREN,SWAP ""
+        )
+        valueIsInList --value $_type \
+            --list "${VALID[TYPES,CHILDREN,${(U)_parent_type}]}" || {
+            errorLog "\'$_type\' is not a valid child type for $_parent_type."
+            exit 1
+            }
+    }
+
+itemHasRequiredOptions () {
+    typeset _item_type="${(U)1}"; shift
+    typeset _item_options_assigned="$@"
+    typeset -A REQUIRED
+    REQUIRED=(
+        DRIVE ""
+        PARTITION "size"
+        ENCRYPTION ""
+        FILESYSTEM "fstype mountpoint"
+        SWAP ""
+        )
+    for _item_req in ${(ps: :)REQUIRED[$_item_type]}
+    do
+        valueIsInList --value $_item_req --list "$_item_options_assigned" || \
+            errorLog "\'$_type\' requires the --$_item_req option"\
+                     "in its storage file entry."
+    done
+    }
+
+convertStorageFileToArray () {
+    # _opts contains the arguments passed to this function
+
+    typeset -A _opts
+    zparseopts -D -E -A _opts -input: -output:
+    _inputfilepath="${${_opts[--input]:-}#=}"
+    _outputarrayname="${${_opts[--output]:-}#=}"
+
+    # initialization
+    #[[ -n "$_inputfilepath" && -n "$_outputarrayname" ]] \
+    #    || errorLog "$0 requires both a filepath and output arrayname."
+
+    unset PAYLOAD
+    typeset -ag STORAGE_CMDS $_outputarrayname
+    typeset -a STORAGE_FILE_RAW_DATA
+    typeset -a STORAGE_FILE_SCRUBBED_DATA
+    typeset -Ag CHILDREN
+
+    # read storage file into array
+    STORAGE_FILE_RAW_DATA=(${(f)"$(<$_inputfilepath)"})
+
+    # strip comments (full or partial)
+    # merge escaped newlines into single lines
+    for _line in "${(@)STORAGE_FILE_RAW_DATA}"; do
+
+        # if this line isn't blank or a comment, continue to process
+        if [[ -n "${_line::=${_line//\#*}}" \
+            && ! "$_line" =~ "^[[:space:]]*$" ]]; then
+
+            # if this line ends in an escaped newline, prep to merge with next
+            if [[ "${_line[-1]}" == \\ ]]; then
+                # set as previous line (and append if we have escaped
+                # newlines on multiple sequential lines)
+                _prev_line="${_prev_line:-}$_line[1,-2]"
+
+            # otherwise assign line to payload (merging with any prev line)
+            else
+
+                _line="${_prev_line:-}$_line"
+                _indent="${#${_line}%%[^[:space:]]*}"
+
+                # if this is the first line, initialize the payload and
+                # check that the first line is of type drive. if not,
+                # prepend a "drive" line (assume implied drive) and add a
+                # global indent value
+                (( ${+PAYLOAD} )) || {
+                    typeset -ag PAYLOAD
+                    [[ "${${(ps: :)_line}[(w)1]}" == "drive" ]] && {
+                        typeset -i _base_indent=$_indent
+                        PAYLOAD=()
+                    } || {
+                        typeset -i _extra_indent=1
+                        typeset -i _base_indent=0
+                        _payload="--type drive "
+                        _payload+="--item_indent 0"
+                        PAYLOAD=("$_payload")
+                        }
+                    }
+
+                _payload="--type ${_line:${_indent}:${#_line}} "
+                _payload+="--item_indent $(( $_indent + ${_extra_indent:-0} ))"
+                PAYLOAD+=("$_payload")
+                _prev_line=""
+            fi
+        fi
+    done
+
+    debugLog "\nPAYLOAD IS CURRENTLY:"
+    for _pline in "${(@)PAYLOAD}"; do debugLog "$_pline"; done
+    debugLog
+
+    # loop through payload and convert, normalizing to command argument
+    # format and performing basic compliance checks
+    initializeStorageTreeValues  --base_indent $_base_indent
+
+}
+
+initializeStorageTreeValues () {
+# uses global state PAYLOAD, yuck. should change this to be a passed
+# scalar value or at the very least a variable reference. Also, should
+# pass the output (STORAGE) array name as a reference, at least. TODO
+typeset _funcopt_values_as_called="$*"
+typeset -i _item_index=0
+typeset -a _funcopts
+_funcopts=(base_indent item_indent parent_index section_indent outputarrayname)
+
+while (( ${#PAYLOAD} )); do
+    eval set -- "$_funcopt_values_as_called ${_head::=${PAYLOAD[1]:-}}"
+    _options_assigned=""
+    
+    for _opt in $STOROPTS_BOOL; do
+        eval "zparseopts -E -$_opt=_$_opt"
+        eval '_optvalue="${_'$_opt'[1]:-}"'
+        [[ -z "$_optvalue" ]] || {
+            eval $_opt'[1]=true';
+            _options_assigned+=" $_opt";
+            }
+    done
+    for _opt in $_funcopts $STOROPTS_SCAL; do
+        eval "zparseopts -E -$_opt:=_$_opt"
+        eval _$_opt'[1]=()'
+        eval '[[ -z "${_'$_opt'[1]:-}" ]] || {
+            _'$_opt'[1]="${_'$_opt'[1]#=}"
+            _options_assigned+=" $_opt"
+            }'
+    done
+
+    # item is a peer of the current section
+    if (( $_item_indent == ${_section_indent:-$_base_indent} ))
+    then
+        _item_index+=1
+        _parent_index_d="${_parent_index:-}${_parent_index:+,}"
+        _full_index="${_parent_index_d}${_item_index}"
+
+        # check that the storage item is not a toaster
+        typeIsValidStorageType $_type || {
+            errorLog "Exiting due to invalid storage type."
+            exit 1
+            }
+
+        # make sure we have all required options
+        itemHasRequiredOptions "$_type" "$_options_assigned" || {
+            errorLog "Exiting due to missing required storage item option."
+            exit 1
+            }
+
+        _parent_type="${STORAGE[${_parent_index:-},TYPE]:-}"
+        if [[ -n ${_parent_type} ]]; then
+            # has a parent, check it, erroring out if not valid
+            typeIsValidChildOf $_type $_parent_type
+        elif [[ "$_type" != "drive" ]]; then
+            # no parent, make sure it is of type drive
+            # if not, assume implied drive and insert a
+            # plain drive entry above it? TODO
+            errorLog "Root devices must be type \"drive\""\
+                     "(not \"$_type\")."
+        fi
+
+        # STORAGE[${_parent_index_d}CHILDTYPES]+=" $_type"
+        STORAGE[${_parent_index_d}CHILDREN]+=" $_full_index"
+
+        # $DEBUG && STORAGE[${_full_index},ARGS]="$@ $_head"
+
+        [[ -z ${_parent_index} ]] || \
+            STORAGE[${_full_index},PARENT]+="$_parent_index"
+
+        for _opt in $STOROPTS_BOOL $STOROPTS_SCAL; do
+            #eval '_optvalue="${_'$_opt'}"'
+            eval '_optvalue="${_'$_opt':-}"'
+            [[ -z "${_optvalue}" ]] || \
+                STORAGE[${_full_index},${(U)_opt}]+="$_optvalue"
+        done
+
+        # trim payload for next go round
+        PAYLOAD[1]=()
+
+    # item is a child of the current section, so recurse
+    elif (( $_item_indent > ${_section_indent:-$_base_indent} ))
+    then
+        _full_index="${_parent_index:-}${_parent_index:+,}${_item_index}"
+        $0  --base_indent "$_base_indent" \
+            --section_indent "$_item_indent" \
+            --parent_index "$_full_index"
+
+    elif (( $_item_indent < ${_section_indent:-$_base_indent} ))
+    then
+
+        # payload head is superior to current level, so return from
+        # recursive call until we get back to a peer level
+        return 0
+
+    fi
+done
+}
+
+selectDrive () {
+    varname=$1
+    typeset -a drives
+    typeset -g SSD
+    drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+    debugLog "Full list of drives: $drives"
+
+    # check if device or child has an existing mountpoint and remove from drives
+    # array if so
+    for drive in $drives; do
+        { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $drive)" ]] \
+          || mount | grep $drive; } && drives=("${(@)drives:#$drive}") || :
+    done
+    debugLog "List of drives with no mountpoint: $drives"
+
+    userQuit () { printLog "\nUser selected quit."; exit; }
+
+    # User selects drive for install
+    typeset CONFIRM="" SELECTED=""
+    typeset -i i=0
+    while [[ ! $CONFIRM =~ [Yy] ]]; do
+
+        # list drives
+        printLog "Available unmounted drives for installation:\n"
+        for drive in $drives; do
+            alertLog "[$(( i += 1))] $drive ($(/usr/bin/lsblk -dno SIZE $drive))"
+        done
+
+        # Pick drive or quit
+        queryLog "\nPlease enter the number of the drive you wish to install to," \
+                 "or 'q' to quit: (1$((($i > 1)) && queryLog "-$i")/q) "
+        while [[ -z $SELECTED || ! $SELECTED =~ [1-$i] && ! ${(L)SELECTED} == q ]]
+        do
+            queryLog "\b \b"
+            read -k 1 SELECTED || : # read returns an error code at EOF; ignore it
+        done
+        [[ $SELECTED != "q" ]] || userQuit
+
+        # Identify as SSD or standard
+        queryLog "\n\nIs $drives[$SELECTED] an SSD? (y/N):"
+        read -k SSD || :; [[ ${(L)SSD} == y ]] && SSD="" || unset SSD; echo
+
+        # Summarize and confirm
+        alertLog "\nYou have selected $drives[$SELECTED] for"\
+                 "COMPLETE ERASURE, and identified it as ${SSD-NOT }an SSD."
+        queryLog "\nEnter'y' to erase, 'n' to make changes, or 'q' to quit: (y/N/q) "
+        read -k CONFIRM ||:; [[ ${(L)CONFIRM} != "q" ]] || userQuit
+    done
+
+    eval "typeset -g $varname"
+    eval $varname'=$drives[$SELECTED]'
+
+    }
+
+makeDevPaths () {
+
+    typeset _parent_index="${1:-}"
+    typeset _parent_index_d="${_parent_index:-}${_parent_index:+,}"
+    typeset _full_index
+
+    for _full_index in ${(ps: :)STORAGE[${_parent_index_d}CHILDREN]:-}; do
+
+        typeset _item_type=${STORAGE[${_full_index},TYPE]}
+        typeset _parent_devpath=${STORAGE[${_parent_index_d}DEVPATH]:-}
+        typeset _devpath=${STORAGE[${_full_index},DEVPATH]:-}
+        typeset _item_label=${STORAGE[${_full_index},LABEL]:-}
+
+        # if it hasn't already been set
+        if [[ -z "$_devpath" ]]; then
+
+            # partitions
+            if [[ "$_item_type" == "partition" ]]; then
+                _devpath=${_parent_devpath}${_full_index##*,}
+
+            # encryption
+            elif [[ "$_item_type" == "encryption" ]]; then
+                _devpath=/dev/mapper/
+                [[ -n ${STORAGE[${_full_index},LABEL]:-} ]] \
+                    && _devpath+=${STORAGE[${_full_index},LABEL]:-// /_} \
+                    || _devpath+=${STORAGE[${_parent_index},DEVPATH]//\//_}
+
+            # swap
+            elif [[ "$_item_type" == "swap" ]]; then
+                _devpath=$_parent_devpath
+
+            # filesystem
+            elif [[ "$_item_type" == "filesystem" ]]; then
+                _devpath=$_parent_devpath
+
+            # filesystem
+            elif [[ "$_item_type" == "subvolume" ]]; then
+                _devpath=$_parent_devpath
+
+            fi
+            STORAGE[${_full_index},DEVPATH]=${_devpath}
+
+        fi
+
+        # recursively handle children
+        makeDevPaths ${_full_index}
+
+    done
+    }
+
+getStorageItemIndexesOfType () {
+    typeset -A _results; _results=(${(kv)STORAGE[(I)*TYPE]})
+    print ${(@ok)_results[(R)$1]%,TYPE}
+    }
+
+getStorageItemIndexesOfTypeForParent () {
+    typeset -A _results; _results=(${(kv)STORAGE[(I)$2,?,TYPE]})
+    print ${(@ok)_results[(R)$1]%,TYPE}
+    }
+
+activateRecord () {
+    unset ACTIVE; typeset -Ag ACTIVE
+    for _key in "${(@k)STORAGE[(I)$1,[^[:digit:]]*]}"; do
+        ACTIVE[${_key#$1,}]="${STORAGE[$_key]}"
+    done
+}

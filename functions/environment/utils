@@ -1,0 +1,36 @@
+countdown () {
+    for i in {$1..1}; do print -n "$i \b" ;sleep 1; print -n "${i//?/\b}"; done
+}
+
+countdownMsg () {
+    justLog "$2:"
+    print -n "$2"
+    for i in {$1..1}; do _count=" in $i seconds"; print -n "$_count \b" ;sleep 1; print -n "${_count//?/\b}"; done
+    #print ":${_count//?/\b}:"
+    print "${_count//?/ }${_count//?/\b}:"
+}
+
+setPassphrase() {
+    returnvar=$1
+    typeset -g $returnvar
+    typeset passphrase="" confirmation=""
+    prompt="${2:-passphrase}"
+    while [[ -z "$passphrase" ]]; do
+        print -n " Enter $prompt   : "
+        read -rs passphrase
+        print
+        print -n " Confirm $prompt : "
+        read -rs confirmation
+        print
+        #print; read -rs "passphrase?Enter $prompt : "
+        #echo "\n\n"; read -rs "confirmation?Confirm $prompt    : "
+        #echo "\n\n"
+        if [[ "$passphrase" != "$confirmation" ]]; then
+        print "\nInput does not match!"
+        passphrase="" confirmation=""
+        fi
+    done
+    #print -rn "$passphrase"
+    typeset -g $returnvar="$passphrase"
+    unset passphrase confirmation
+}

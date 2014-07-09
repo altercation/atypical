@@ -138,7 +138,8 @@ STOROPTS[LUKS,OPEN,SSD]='--allow-discards'
 Loading & processing atypical storage table file
 -------------------------------------------------------------------------------
 # source remote URI or create absolute filepath
-if [[ "$STORAGE_FILE" =~ "(http|ftp)s?:.*" ]]; then
+if [[ "$STORAGE_FILE" =~ "(http|ftp)s?:.*" ]]
+then
     { curl -#L $STORAGE_FILE -o $TMPSTOR } ioLog \
     && { successLog "Retrieved remote storage table file.";
          STORAGE_FILE="$TMPSTOR"; } \
@@ -148,23 +149,28 @@ fi
 
 # create absolute path if storage value is simple filename or relative path
 # finally confirming that storage path exists
-if [[ "${STORAGE_FILE:0:1}" != "/" ]]; then
+if [[ "${STORAGE_FILE:0:1}" != "/" ]]
+then
     if [[ -n "${CUSTOM_ROOT:-}" ]] \
-    && [[ -f "${STORAGE_PATH::=$CUSTOM_ROOT/storage/$STORAGE_FILE}" ]]; then
+    && [[ -f "${STORAGE_PATH::=$CUSTOM_ROOT/storage/$STORAGE_FILE}" ]]
+    then
         # found custom rooted storage file
         successLog "Found custom storage table file $STORAGE_FILE." || \
-    elif [[ -f "${STORAGE_PATH::=$SCRIPT_ROOT/storage/$STORAGE_FILE}" ]]; then
+    elif [[ -f "${STORAGE_PATH::=$SCRIPT_ROOT/storage/$STORAGE_FILE}" ]]
+    then
         # found custom rooted storage file
         successLog "Found storage table file $STORAGE_FILE." || \
         debugLog "Used storage path: $STORAGE_PATH"
     else
         errorLog "Could not find storage table file named $STORAGE_FILE." \
-                 "\nCheck your storage subdirectory and naming." \
-                 "\nLast checked path: $STORAGE_PATH"
+            "\nCheck your storage subdirectory and naming." \
+            "\nLast checked path: $STORAGE_PATH"
     fi
     STORAGE_FILE="$STORAGE_PATH"
-elif [[ ! -f "$STORAGE_FILE" ]]; then
+elif [[ ! -f "$STORAGE_FILE" ]]
+then
     errorLog "Could not find storage table file at path $STORAGE_FILE."
+
 fi
 
 
@@ -173,204 +179,28 @@ fi
 Processing storage table values
 -------------------------------------------------------------------------------
 
-# note use of 'e' expansion flag to parse variables like $RAM
+# The valid options (boolean and scalar separate) for storage items.
+# Not all options are valid for all types, but this is at least a basic
+# sanity check. Used in the convertStorageFileToArray function, listed
+# here as this is the one stop location for adding/removing/renaming.
+typeset -a STOROPTS_SCAL STOROPTS_BOOL
+STOROPTS_BOOL=(bootable noclobber ssd)
+STOROPTS_SCAL=(devpath fstype label code mountopts mountpoint size type)
 
-zmodload zsh/zutil
-
-unset STORAGE; typeset -A STORAGE
-
-# only these storage types allowed
-valueIsInList () {
-    typeset -A _opts
-    zmodload zsh/zutil
-    zparseopts -D -E -A _opts -value: -list:
-    _value="${${_opts[--value]:-}#=}"
-    _list=(${(ps: :)${_opts[--list]:-}})
-    (( ${_list[(i)$_value]} <= ${#_list} ))
-    }
-
-typeIsValidStorageType () {
-    typeset _type="$1"
-    typeset -A VALID
-    VALID=(TYPES "drive partition logical encryption filesystem subvolume swap")
-    valueIsInList --value $_type --list "${VALID[TYPES]}" && return 0 || \
-        errorLog "$_type is not a valid storage type."
-    }
-
-typeIsValidChildOf () {
-    typeset _type="$1" _parent_type=$2
-    typeset -A VALID
-    VALID=(
-        TYPES,CHILDREN,DRIVE "partition logical encryption filesystem"
-        TYPES,CHILDREN,PARTITION "logical encryption filesystem swap"
-        TYPES,CHILDREN,ENCRYPTION "logical filesystem swap"
-        TYPES,CHILDREN,FILESYSTEM "subvolume"
-        TYPES,CHILDREN,SWAP ""
-        )
-        valueIsInList --value $_type \
-            --list "${VALID[TYPES,CHILDREN,${(U)_parent_type}]}" || \
-            errorLog "$_type is not a valid child type for $_parent_type."
-    }
-
-_convert_storage_file_to_array () {
-    # _opts contains the arguments passed to this function
-
-    typeset -A _opts
-    zmodload zsh/zutil
-    zparseopts -D -E -A _opts -input: -output:
-    _inputfilepath="${${_opts[--input]:-}#=}"
-    _outputarrayname="${${_opts[--output]:-}#=}"
-
-    # initialization
-    [[ -n "$_inputfilepath" && -n "$_outputarrayname" ]] \
-        || errorLog "$0 requires both a filepath and output arrayname."
-
-    unset PAYLOAD
-    typeset -ag STORAGE_CMDS $_outputarrayname
-    typeset -a STORAGE_FILE_RAW_DATA
-    typeset -a STORAGE_FILE_SCRUBBED_DATA
-    typeset -Ag CHILDREN
-
-    # read storage file into array
-    STORAGE_FILE_RAW_DATA=(${(f)"$(<$_inputfilepath)"})
-
-    # strip comments (full or partial)
-    # merge escaped newlines into single lines
-    for _line in "${(@)STORAGE_FILE_RAW_DATA}"; do
-
-        # if this line isn't blank or a comment, continue to process
-        if [[ -n "${_line::=${_line//\#*}}" \
-            && ! "$_line" =~ "^[[:space:]]*$" ]]; then
-
-            # if this line ends in an escaped newline, prep to merge with next
-            if [[ "${_line[-1]}" == \\ ]]; then
-                # set as previous line (and append if we have escaped
-                # newlines on multiple sequential lines)
-                _prev_line="${_prev_line:-}$_line[1,-2]"
-
-            # otherwise assign line to payload (merging with any prev line)
-            else
-
-                _line="${_prev_line:-}$_line"
-                _indent="${#${_line}%%[^[:space:]]*}"
-
-                # if this is the first line, initialize the payload and
-                # check that the first line is of type drive. if not,
-                # prepend a "drive" line (assume implied drive) and add a
-                # global indent value
-                (( ${+PAYLOAD} )) || {
-                    typeset -ag PAYLOAD
-                    [[ "${${(ps: :)_line}[1]}" == "drive" ]] && {
-                        typeset -i _base_indent=$_indent
-                        PAYLOAD=()
-                    } || {
-                        print "FIRST WORD IS ${${(ps: :)_line}[1]}"
-                        typeset -i _extra_indent=1
-                        typeset -i _base_indent=0
-                        _payload="--type drive "
-                        _payload+="--item_indent 0"
-                        PAYLOAD=("$_payload")
-                        }
-                    }
-
-                _payload="--type ${_line:${_indent}:${#_line}} "
-                _payload+="--item_indent $(( $_indent + ${_extra_indent:-0} ))"
-                PAYLOAD+=("$_payload")
-                _prev_line=""
-            fi
-        fi
-    done
-
-    _initialize_storage_tree_values  --base_indent $_base_indent
-
-}
-
-_initialize_storage_tree_values () {
-# uses global state PAYLOAD, yuck. should change this to be a passed
-# scalar value or at the very least a variable reference. Also, should
-# pass the output (STORAGE) array name as a reference, at least. TODO
-typeset -i _item_index=0
-while (( ${#PAYLOAD} )); do
-    _boolopts=(bootable noclobber)
-    _funcopts=(base_indent item_indent parent_index section_indent)
-    _storopts=(devpath fstype label mountopts mountpoint size type)
-    _head="${PAYLOAD[1]:-}"
-    eval set -- "$@ $_head"
-    for _opt in $_boolopts; do
-            eval "zparseopts -E -$_opt=_$_opt"
-            eval _$_opt'=true'
-    done
-    for _opt in $_funcopts $_storopts; do
-            eval "zparseopts -E -$_opt:=_$_opt"
-            eval _$_opt'[1]=()'
-            eval '[[ -z "${_'$_opt'[1]:-}" ]] || \
-                _'$_opt'[1]="${_'$_opt'[1]#=}"'
-    done
-
-    # item is a peer of the current section
-    if (( $_item_indent == ${_section_indent:-$_base_indent} ))
-    then
-        _item_index+=1
-        _parent_index_d="${_parent_index:-}${_parent_index:+,}"
-        _full_index="${_parent_index_d}${_item_index}"
-
-        # check that the storage item is not a toaster
-        typeIsValidStorageType $_type
-
-        _parent_type="${STORAGE[${_parent_index:-},TYPE]:-}"
-        if [[ -n ${_parent_type} ]]; then
-            # has a parent, check it
-            typeIsValidChildOf $_type $_parent_type
-        elif [[ "$_type" != "drive" ]]; then
-            # no parent, make sure it is of type drive
-            # if not, assume implied drive and insert a
-            # plain drive entry above it? TODO
-            errorLog "Root devices must be type \"drive\""\
-                     "(not \"$_type\")."
-        fi
-
-        # STORAGE[${_parent_index_d}CHILDTYPES]+=" $_type"
-        STORAGE[${_parent_index_d}CHILDREN]+=" $_full_index"
-
-        # $DEBUG && STORAGE[${_full_index},ARGS]="$@ $_head"
-
-        [[ -z ${_parent_index} ]] || \
-            STORAGE[${_full_index},PARENT]+="$_parent_index"
-
-        for _opt in $_storopts; do
-            eval '_optvalue="${_'$_opt'}"'
-            [[ -z "${_optvalue}" ]] || \
-                STORAGE[${_full_index},${(U)_opt}]+="$_optvalue"
-        done
-
-        # trim payload for next go round
-        PAYLOAD[1]=()
-
-    # item is a child of the current section, so recurse
-    elif (( $_item_indent > ${_section_indent:-$_base_indent} ))
-    then
-        _full_index="${_parent_index:-}${_parent_index:+,}${_item_index}"
-        $0  --base_indent "$_base_indent" \
-            --section_indent "$_item_indent" \
-            --parent_index "$_full_index"
-
-    elif (( $_item_indent < ${_section_indent:-$_base_indent} ))
-    then
-
-        # payload head is superior to current level, so return from
-        # recursive call until we get back to a peer level
-        return 0
-
-    fi
-done
-}
-
-_convert_storage_file_to_array --input $STORAGE_FILE --output STORAGE_COMMANDS 
+# a little too dependent on state, but it's not easy to functionally
+# pass associative arrays around so this will write out to the
+# global STORAGE array. This could be passed at least as an explicit
+# --output argument (i.e. the name of the array) but indirect references
+# to associative array values are ridiculous looking in zsh.
+typeset -A STORAGE
+convertStorageFileToArray --input $STORAGE_FILE \
+    && successLog "Storage file successfully converted for processing." \
+    || errorLog "Failed to converted storage file for processing." \
 
 # Ordered list of mounts for use in later loops.
 # Useful in particular so that we have a naturally ordered list
 # of mounts from / on down.
-MOUNTPOINTS=(${(vo)STORAGE[(I)*,MOUNTPOINT]})
+#MOUNTPOINTS=(${(vo)STORAGE[(I)*,MOUNTPOINT]})
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -379,63 +209,14 @@ Identifying installation drive(s)
 # Uses either the preset --devpath value for drives from the storage file or
 # interactively selects the drive
 
-# Create list of drives and remove mounted drives from list
-selectDrive () {
-varname=$1
-typeset -a drives
-drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
-debugLog "Full list of drives: $drives"
+# If a drive devpath is not set (normally will be unset), prompt for it here
 
-# check if device or child has an existing mountpoint and remove from drives
-# array if so
-for drive in $drives; do
-    { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $drive)" ]] \
-      || mount | grep $drive; } && drives=("${(@)drives:#$drive}") || :
-done
-debugLog "List of drives with no mountpoint: $drives"
-
-userQuit () { printLog "\nUser selected quit."; exit; }
-
-# User selects drive for install
-typeset CONFIRM="" SELECTED=""
-typeset -i i=0
-while [[ ! $CONFIRM =~ [Yy] ]]; do
-
-    # list drives
-    printLog "Available unmounted drives for installation:\n"
-	for drive in $drives; do
-        alertLog "[$(( i += 1))] $drive ($(/usr/bin/lsblk -dno SIZE $drive))"
-    done
-
-    # Pick drive or quit
-	queryLog "\nPlease enter the number of the drive you wish to install to," \
-             "or 'q' to quit: (1$((($i > 1)) && queryLog "-$i")/q) "
-	while [[ -z $SELECTED || ! $SELECTED =~ [1-$i] && ! ${(L)SELECTED} == q ]]
-    do
-        queryLog "\b \b"
-        read -k 1 SELECTED || : # read returns an error code at EOF; ignore it
-    done
-    [[ $SELECTED != "q" ]] || userQuit
-
-    # Identify as SSD or standard
-	queryLog "\n\nIs $drives[$SELECTED] an SSD? (y/N):"
-    read -k SSD || :; [[ ${(L)SSD} == y ]] && SSD="" || unset SSD; echo
-
-    # Summarize and confirm
-	alertLog "\nYou have selected $drives[$SELECTED] for"\
-             "COMPLETE ERASURE, and identified it as ${SSD-NOT }an SSD."
-    queryLog "\nEnter'y' to erase, 'n' to make changes, or 'q' to quit: (y/N/q) "
-    read -k CONFIRM ||:; [[ ${(L)CONFIRM} != "q" ]] || userQuit
-done
-
-eval "typeset -g $varname"
-eval $varname'=$drives[$SELECTED]'
-}
-
-_drives=(${(ps: :)STORAGE[CHILDREN]})
-for _drive in ${_drives}; do
+_drives=($(getStorageItemIndexesOfType drive))
+for _drive in $_drives
+do
     debugLog "Checking drive $_drive"
-    if [[ -z "${STORAGE[$_drive,DEVPATH]:-}" ]]; then
+    if [[ -z "${STORAGE[$_drive,DEVPATH]:-}" ]]
+    then
         _msg="Please select a drive for installation"
         alertLog "\n\n$_msg"
         if (( ${#_drives} > 1 )); then
@@ -445,84 +226,46 @@ for _drive in ${_drives}; do
         fi
         selectDrive DRIVEPATH
         STORAGE[$_drive,DEVPATH]="${DRIVEPATH:-}"
+        [[ -z "$SSD" ]] || {
+        print "YES IS SSD" # debug DEBUG xxx
+        STORAGE[$_drive,SSD]="true"
+    }
     else
         # set a flag so that we know a drive device path has been picked using
         # a value from the storage file... we want to confirm again if this is
         # the case...
         STORAGE[FILEPICKEDPATH]=true
     fi
+
 done
 
 # if any of the drive paths were set directly from the storage file, confirm
 # before proceeding (no auto erasure)
-if (( ${+STORAGE[FILEPICKEDPATH]} )); then
-        (( ${#_drives} > 1 )) && s="s" || s=""
-        alertLog "\nIMPORTANT - DATA WILL BE ERASED!"
-        printLog "Installation will occur to the following device$s:\n"
-        for _drive in ${_drives}; do
-            printLog "DRIVE $_drive device path: ${STORAGE[$_drive,DEVPATH]}"
-        done
-        queryLog "Enter'y' to install to drive$s listed above or 'q' to quit: (y/q) "
-        read -k CONFIRM ||:; [[ ${(L)CONFIRM} == "y" ]] || userQuit
+if (( ${+STORAGE[FILEPICKEDPATH]} ))
+then
+    (( ${#$(getStorageItemIndexesOfType drive)} > 1 )) && s="s" || s=""
+    # (( ${#_drives} > 1 )) && s="s" || s=""
+    ${SIM:-false} || alertLog "IMPORTANT - DATA WILL BE ERASED!"
+    printLog "Installation will occur to the following device$s:\n"
+    for _drive in $(getStorageItemIndexesOfType drive)
+    do
+        printLog "DRIVE $_drive device path: ${STORAGE[$_drive,DEVPATH]}"
+    done
+    ${FORCE:-false} || {
+        queryLog "\nEnter'y' to install to drive$s listed, 'q' to quit: (y/q) "
+        read -k CONFIRM ||:; [[ ${(L)CONFIRM} == "y" ]] || {
+        printLog "\n\nUser selected exit.\n"; exit 0 }
+        }
 fi
-
-alertLog "\n\nInstallation beginning..."
 
 :""<< \
 -------------------------------------------------------------------------------
 Assembling device paths on target drive(s)
 -------------------------------------------------------------------------------
-makeDevPaths () {
-
-typeset _parent_index="${1:-}"
-typeset _parent_index_d="${_parent_index:-}${_parent_index:+,}"
-typeset _full_index
-
-for _full_index in ${(ps: :)STORAGE[${_parent_index_d}CHILDREN]:-}; do
-
-    typeset _item_type=${STORAGE[${_full_index},TYPE]}
-    typeset _parent_devpath=${STORAGE[${_parent_index_d}DEVPATH]:-}
-    typeset _devpath=${STORAGE[${_full_index},DEVPATH]:-}
-    typeset _item_label=${STORAGE[${_full_index},LABEL]:-}
-
-    # if it hasn't already been set
-    if [[ -z "$_devpath" ]]; then
-
-        # partitions
-        if [[ "$_item_type" == "partition" ]]; then
-            _devpath=${_parent_devpath}${_full_index##*,}
-
-        # encryption
-        elif [[ "$_item_type" == "encryption" ]]; then
-            _devpath=/dev/mapper/
-            [[ -n ${STORAGE[${_full_index},LABEL]:-} ]] \
-                && _devpath+=${STORAGE[${_full_index},LABEL]:-// /_} \
-                || _devpath+=${STORAGE[${_parent_index},DEVPATH]//\//_}
-
-        # swap
-        elif [[ "$_item_type" == "swap" ]]; then
-            _devpath=$_parent_devpath
-
-        # filesystem
-        elif [[ "$_item_type" == "filesystem" ]]; then
-            _devpath=$_parent_devpath
-
-        # filesystem
-        elif [[ "$_item_type" == "subvolume" ]]; then
-            _devpath=$_parent_devpath
-
-        fi
-        STORAGE[${_full_index},DEVPATH]=${_devpath}
-
-    fi
-
-    # recursively handle children
-    makeDevPaths ${_full_index}
-
-done
-}
-
-makeDevPaths
+# following function assigns valid device paths to all STORAGE items
+makeDevPaths \
+    && successLog "Assembled device paths successfully." \
+    || errorLog "Failed to assemble device paths."
 
 debugLog "\nSTORAGE ARRAY VALUES:\n"
 for _childkey in ${(ovps: :)STORAGE[(I)*CHILDREN]}; do
@@ -530,19 +273,21 @@ for _childkey in ${(ovps: :)STORAGE[(I)*CHILDREN]}; do
         debugLog "$_key: ${STORAGE[$_key]}"
     done
 done
+
 #debugLog "\n\nOrder of initialization:"
 #debugLog ${STORAGE[CHILDREN]}
 #debugLog ${(ov)STORAGE[(I)*CHILDREN]}
 
-exit
-
 :<< \
 -------------------------------------------------------------------------------
-DESTRUCTION FOLLOWS
+DESTRUCTION FOLLOWS!
 -------------------------------------------------------------------------------
+${SIM:-false} || :""""<<< "INSTALLATION BEGINNING... DATA WILL BE ERASED!"
+# unless -s --sim --simulated option is set, actual destruction will follow
+SIM=true # DEBUG - turning sim on
 
 :<< \
--------------------------------------------------------------------------------
+'-------------------------------------------------------------------------------'
 DEBUG for second pass
 # DEBUGGING - turn off active swap
 swapoff -a
@@ -557,55 +302,147 @@ for _record_index in {1..$NUM_STORAGE_RECORDS}; do
 done
 -------------------------------------------------------------------------------
 
-# Erase drive, create new GPT structure, and create partitions
-storageGeneratePartitioningCommandForDrive _part_command $DRIVE
-eval "$_part_command"
-
-:<< \
+:""<< \
 -------------------------------------------------------------------------------
-ENCRYPT STORAGE
+Erasing/preparing target drive(s)
 -------------------------------------------------------------------------------
-
-# Check if we need encryption
-ENCRYPTION=false
-for _record_index in {1..$NUM_STORAGE_RECORDS}; do
-    setActiveStorageRecordWithPrefix $_record_index _record
-    [[ ${(L)_record_fstype} == luks ]] && ENCRYPTION=true || :
-    unsetActiveStorageRecordWithPrefix _record
+for _drive in $(getStorageItemIndexesOfType drive); do
+    activateRecord $_drive
+    if (( ${+ACTIVE[NOCLOBBER]} )); then
+        alertLog "\nNoclobber option set on drive $_drive !"
+        printLog "\nNoclobber prevents all changes to a drive. This is likely"\
+                 "not what you intended. \nnoclobber should be used on "\
+                 "existing partitions or filesystems)\n"
+        exit 1
+    else
+        alertLog "\nPreparing to erase drive $_drive... ${_SIM}"
+        ${SIM:-false} || countdownMsg 5 "Erasing drive ${ACTIVE[DEVPATH]}"
+        evalSim  sgdisk --zap-all ${ACTIVE[DEVPATH]} # erase everything!
+        evalSim  sgdisk --clear ${ACTIVE[DEVPATH]}   # create new gpt structure
+        ${SIM:-false} || successLog "Drive ${ACTIVE[DEVPATH]} erased!"
+    fi
 done
 
-if [[ $ENCRYPTION == true ]]; then
+:""<< \
+-------------------------------------------------------------------------------
+Processing partitions
+-------------------------------------------------------------------------------
+_partitions=($(getStorageItemIndexesOfType partition))
+if [[ -n "${_partitions}" ]];
+then
 
-    # Get passphrase
-    setPassphrase PASSPHRASE "disk encryption passphrase"
-    #PASSPHRASE=DEBUG
+    # check for bootable option or, if single partition, make it bootable
+    # TODO: there may be edge cases where making a single partition bootable
+    # is not desirable.
+    if (( ${#_partitions} > 1 )) \
+        && [[ -z "${(k)STORAGE[(I)*BOOTABLE]}" ]]; then
+        errorLog "At least one partition must have the --bootable option in" \
+            "the storage item\ndefinition file"
+    elif (( ${#_partitions} == 1 )) \
+        && [[ -z "${(k)STORAGE[(I)*BOOTABLE]}" ]]; then
+        # single partition, set as bootable
+        STORAGE[${_partitions},BOOTABLE]=true
+    fi
 
-    # Encrypt partitions
-    for _record_index in {1..$NUM_STORAGE_RECORDS}; do
-        setActiveStorageRecordWithPrefix $_record_index _record
-        if [[ ${(L)_record_fstype} == luks ]]; then
-        print "Encrypting $_record_label on $_record_device_path ... "
-            print -r "$PASSPHRASE" \
-                | cryptsetup ${LUKS_OPTIONS[FORMAT_OPTIONS]:-} \
-                  luksFormat $_record_device_path
-            print -r "$PASSPHRASE" \
-                | cryptsetup open ${LUKS_OPTIONS[OPEN_OPTIONS]:-} \
-                  ${SSD:-${LUKS_OPTIONS[OPEN_OPTIONS,SSD]:-}} \
-                  $_record_device_path $_record_label
-        fi
-        unsetActiveStorageRecordWithPrefix _record
+    typeset -a _sgdisk_cmd
+    for _drive in $(getStorageItemIndexesOfType drive); do
+        activateRecord $_drive
+        _drive_devpath=${ACTIVE[DEVPATH]}
+        for _partition in \
+            $(getStorageItemIndexesOfTypeForParent partition $_drive)
+        do
+            activateRecord $_partition
+            printLog "Preparing formatting command for ${ACTIVE[DEVPATH]}"
+            _id=${ACTIVE[DEVPATH][-1]}
+            if [[ ${(L)ACTIVE[SIZE]} =~ "^max" ]]; then
+                _sgdisk_cmd+=("--largest-new=${_id}")
+            else
+                _sgdisk_cmd+=("--new=${_id}:0:+${ACTIVE[SIZE]}")
+            fi
+            if [[ -n "${(L)ACTIVE[BOOTABLE]:-}" ]]; then
+                _sgdisk_cmd+=("--attributes=${_id}:set:0")
+            fi
+            #[[ -z "${ACTIVE[CODE]:-}" ]] || \
+            #    _sgdisk_cmd+=("--typecode=${_id}:${ACTIVE[CODE]}")
+            _sgdisk_cmd+=("${ACTIVE[CODE]:+--typecode=${_id}:${ACTIVE[CODE]}}")
+            _sgdisk_cmd+=("${ACTIVE[LABEL]:+--typecode=${_id}:${(q-)ACTIVE[LABEL]}}")
+        done
+        # TODO: do I need to set a default code if absent?
+        evalSim sgdisk $_sgdisk_cmd
     done
-
-    # Cleanup
-    unset PASSPHRASE
-
+else
+    # TODO: can add in an fstype validity check here and remove warning
+    alertLog "No partitions listed as children of drives! Ensure you have" \
+        "specified a\nfilesystem type that can be initialized directly to a" \
+        "drive without a partition.\nPROCEEDING..."
 fi
 
-:<< \
+:""<< \
 -------------------------------------------------------------------------------
-MAKE FILESYSTEMS
+Encrypting storage
 -------------------------------------------------------------------------------
 
+_encryption=($(getStorageItemIndexesOfType encryption))
+
+if [[ -n "$_encryption" ]]; then
+    # Get passphrase
+    setPassphrase PASSPHRASE "disk encryption passphrase"
+    # Encrypt partitions
+    for _encrypted_item in ${_encryption}; do
+        activateRecord $_encrypted_item
+        progressLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}"
+        print "${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
+        evalSim print -r "$PASSPHRASE" \
+            | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} \
+              luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}
+        evalSim print -r "$PASSPHRASE" \
+            | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} \
+            ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} \
+            ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}
+    done
+    unset PASSPHRASE
+else
+    successLog "No encrypted storage items found; skipping encryption."
+fi
+exit
+
+:""<< \
+-------------------------------------------------------------------------------
+Activating swap
+-------------------------------------------------------------------------------
+_swap=($(getStorageItemIndexesOfType swap))
+if (( ${#_swap} > 1 )); then
+    errorLog "Multiple swap partitions listed; there can be only one."
+    exit 1
+fi
+exit
+
+    for _encrypted_item in ${_encryption}; do
+        activateRecord $_encrypted_item
+        print "Encrypting $_record_label on $_record_device_path ... "
+            print -r "$PASSPHRASE" \
+                | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} \
+                  luksFormat $_record_device_path
+            print -r "$PASSPHRASE" \
+                | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} \
+                  ${ACTIVE[PARENT]:-${LUKS_OPTIONS[LUKS,OPEN,SSD]:-}} \
+                  $_record_device_path $_record_label
+    done
+    unset PASSPHRASE
+else
+    successLog "No encrypted storage items found; skipping encryption."
+fi
+
+:""<< \
+-------------------------------------------------------------------------------
+Initializing filesystems
+-------------------------------------------------------------------------------
+
+            _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
+                                    ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
+                                    ${_record_mkfs_options:-})
+            eval mkfs.${(L)_record_fstype} $_mkfs_options_compiled \
+                                           $_record_device_path
 # FIRST PASS: isn't luks, doesn't have "child of"
 # (so should be our top level physical partitions)
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
