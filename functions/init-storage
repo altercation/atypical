@@ -288,8 +288,6 @@ done
 DESTRUCTION FOLLOWS!
 -------------------------------------------------------------------------------
 ${SIM:-false} || :""""<<< "INSTALLATION BEGINNING... DATA WILL BE ERASED!"
-# unless -s --sim --simulated option is set, actual destruction will follow
-SIM=true # DEBUG - turning sim on
 
 :<< \
 '-------------------------------------------------------------------------------'
