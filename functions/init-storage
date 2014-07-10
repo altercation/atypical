@@ -371,7 +371,8 @@ then
             _sgdisk_cmd+=(${ACTIVE[LABEL]:+--change-name=${_id}:${(q-)ACTIVE[LABEL]}})
         done
         _sgdisk_cmd+=($_drive_devpath)
-        evalSim "print 'Partitioning...' && sgdisk $_sgdisk_cmd && print 'Partitions created successfully' || { print 'Partition creation failed'; exit 1; }"
+        #evalSim "print 'Partitioning...' && sgdisk $_sgdisk_cmd && print 'Partitions created successfully' || { print 'Partition creation failed'; exit 1; }"
+        evalSim print 'Partitioning...' && sgdisk $_sgdisk_cmd && print 'Partitions created successfully' || { print 'Partition creation failed'; exit 1; }
     done
 else
     # TODO: can add in an fstype validity check here and remove warning
