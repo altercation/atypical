@@ -399,6 +399,7 @@ if [[ -n "$_encryption" ]]; then
         print "${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
         typeset _luks_format="print -r "$PASSPHRASE" | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}"
         typeset _luks_open="print -r "$PASSPHRASE" | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}"
+        print "SIM IS ${SIM:-false}"
         if ${SIM:-false}; then
             print ">>>>>"
             simPrint $_luks_format
