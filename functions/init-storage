@@ -368,7 +368,7 @@ then
             #[[ -z "${ACTIVE[CODE]:-}" ]] || \
             #    _sgdisk_cmd+=("--typecode=${_id}:${ACTIVE[CODE]}")
             _sgdisk_cmd+=("${ACTIVE[CODE]:+--typecode=${_id}:${ACTIVE[CODE]}}")
-            _sgdisk_cmd+=("${ACTIVE[LABEL]:+--typecode=${_id}:${(q-)ACTIVE[LABEL]}}")
+            _sgdisk_cmd+=("${ACTIVE[LABEL]:+--typecode=${_id}:${ACTIVE[LABEL]}}")
         done
         # TODO: do I need to set a default code if absent?
         evalSim sgdisk $_sgdisk_cmd
@@ -379,6 +379,8 @@ else
         "specified a\nfilesystem type that can be initialized directly to a" \
         "drive without a partition.\nPROCEEDING..."
 fi
+
+evalSim print "This is a test"
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -394,11 +396,13 @@ if [[ -n "$_encryption" ]]; then
     for _encrypted_item in ${_encryption}; do
         activateRecord $_encrypted_item
         progressLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}"
-        print "${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
+        _ssd="${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
         typeset _luks_format='print -r "$PASSPHRASE" | cryptsetup \
             ${STOROPTS[LUKS,FORMAT]:-} luksFormat \
             ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}'
-        typeset _luks_open='print -r "$PASSPHRASE" | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}'
+        typeset _luks_open='print -r "$PASSPHRASE" | cryptsetup open \
+            ${STOROPTS[LUKS,OPEN]:-} \
+            ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}'
         if ${SIM:-false}; then
             simPrint $_luks_format
             simPrint $_luks_open
