@@ -243,7 +243,6 @@ do
         STORAGE[FILEPICKEDPATH]=true
     fi
 done
-exit
 
 # if any of the drive paths were set directly from the storage file, confirm
 # before proceeding (no auto erasure)
