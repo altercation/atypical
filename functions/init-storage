@@ -372,6 +372,7 @@ then
         done
         # TODO: do I need to set a default code if absent?
         evalSim sgdisk $_sgdisk_cmd
+        print ">>>>> sgdisk $_sgdisk_cmd"
     done
 else
     # TODO: can add in an fstype validity check here and remove warning
@@ -379,6 +380,8 @@ else
         "specified a\nfilesystem type that can be initialized directly to a" \
         "drive without a partition.\nPROCEEDING..."
 fi
+
+evalSim print "this is a test"
 
 :""<< \
 -------------------------------------------------------------------------------
