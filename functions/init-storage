@@ -405,8 +405,8 @@ if [[ -n "$_encryption" ]]; then
             simPrint $_luks_open
         else
             print "<<<<<"
-            evalSim $_luks_format
-            evalSim $_luks_open
+            evalSim ${(Q)_luks_format}
+            evalSim ${(Q)_luks_open}
         fi
 #        evalSim print -r "$PASSPHRASE" \
 #            | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} \
