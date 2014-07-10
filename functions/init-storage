@@ -406,7 +406,7 @@ if [[ -n "$_encryption" ]]; then
         _luks_open=(
             print -r "$PASSPHRASE" "| cryptsetup open ${STOROPTS[LUKS,OPEN]:-}"
             ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}
-            ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}
+            ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]}
             )
         #if ${SIM:-false}; then
         #    simPrint "$_luks_format"
