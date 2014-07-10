@@ -371,8 +371,7 @@ then
             _sgdisk_cmd+=(${ACTIVE[LABEL]:+--typecode=${_id}:${(q-)ACTIVE[LABEL]}})
         done
         # TODO: do I need to set a default code if absent?
-        evalSim sgdisk $_sgdisk_cmd
-        print ">>>>> sgdisk $_sgdisk_cmd"
+        evalSim "sgdisk $_sgdisk_cmd && successLog 'Partitions created successfully' errorLog 'Partition creation failed'"
     done
 else
     # TODO: can add in an fstype validity check here and remove warning
