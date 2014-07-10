@@ -84,8 +84,8 @@ alias -g  :\"\"\"\"='print -P -- "%F{red}%B\n${__:=${(r:80::--:):-}}" >&1 >&$LOG
 
 evalSim () {
     ${SIM:-false} \
-        && simPrint "${(q-)@}" \
-        || { simLog "${(q-)@}"; { eval "$@"; } ioLog; }
+        && simPrint "${(q-)*}" \
+        || { simLog "${(q-)*}"; { eval $@; } ioLog; }
     }
 
 
