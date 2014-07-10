@@ -368,10 +368,10 @@ then
             #[[ -z "${ACTIVE[CODE]:-}" ]] || \
             #    _sgdisk_cmd+=("--typecode=${_id}:${ACTIVE[CODE]}")
             _sgdisk_cmd+=(${ACTIVE[CODE]:+--typecode=${_id}:${ACTIVE[CODE]}})
-            _sgdisk_cmd+=(${ACTIVE[LABEL]:+--typecode=${_id}:${(q-)ACTIVE[LABEL]}})
+            _sgdisk_cmd+=(${ACTIVE[LABEL]:+--change-name=${_id}:${(q-)ACTIVE[LABEL]}})
         done
-        # TODO: do I need to set a default code if absent?
-        evalSim "print 'Partitioning...' && sgdisk $_sgdisk_cmd && successLog 'Partitions created successfully' || errorLog 'Partition creation failed'"
+        _sgdisk_cmd+=($_drive_devpath)
+        evalSim "print 'Partitioning...' && sgdisk $_sgdisk_cmd && print 'Partitions created successfully' || { print 'Partition creation failed'; exit 1; }"
     done
 else
     # TODO: can add in an fstype validity check here and remove warning
