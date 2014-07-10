@@ -410,8 +410,13 @@ if [[ -n "$_encryption" ]]; then
             ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}
             ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}
             )
+            print ">>>>>>>>>>>>>>>>>"
+        print "$_luks_format"
+            print ">>>>>>>>>>>>>>>>>"
+        print "$_luks_open"
+            print ">>>>>>>>>>>>>>>>>"
         if ${SIM:-false}; then
-            simPrint $_luks_format
+            simPrint "$_luks_format"
             simPrint $_luks_open
         else
             evalSim ${_luks_format}
