@@ -82,10 +82,11 @@ alias -g  :\"\"\"\"='print -P -- "%F{red}%B\n${__:=${(r:80::--:):-}}" >&1 >&$LOG
 # depending on sim state, either evaluate or output what would have been
 # evaluated to both console and save to a sim file
 
-evalSim () {
+evalSim1 () {
     ${SIM:-false} \
         && simPrint "${(q-)@}" \
         || { simLog "${(q-)@}"; { eval $@; } ioLog; }
     }
+evalSim () { ${SIM:-false} && simPrint $@ || { simLog $@; { eval $@; } ioLog; }; }
 
 
