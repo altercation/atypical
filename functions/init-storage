@@ -475,6 +475,16 @@ for _filesystem in $(getStorageItemIndexesOfType filesystem); do
         )
         evalSim mkfs.${(L)ACTIVE[FSTYPE]} ${(e)_mkfs_options} ${ACTIVE[DEVPATH]}
 done
+
+:""<< \
+-------------------------------------------------------------------------------
+Mounting filesystems
+-------------------------------------------------------------------------------
+for _mountpoint in ${(ko)STORAGE[(I)*,MOUNTPOINT]}
+    print "MOUNTPOINT: ${STORAGE[$_mountpoint]}"
+    #activateRecord $_filesystem
+do
+done
 exit
 
 :<< EOF
