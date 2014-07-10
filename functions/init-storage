@@ -236,9 +236,9 @@ do
         # a value from the storage file... we want to confirm again if this is
         # the case...
         valueIsInList --value ${STORAGE[$_drive,DEVPATH]} --list "$_unmounted_drives" || {
-             errorLog "${STORAGE[$_drive,DEVPATH]} is specified explicitly in storage" \
-                      "definition file but is currently\nmounted or inaccessible."
-             exit 1
+        $(${TEST:-false} && print "printLog" || print "errorLog") \
+                "${STORAGE[$_drive,DEVPATH]} is specified explicitly in storage" \
+                "definition file but is currently\nmounted or inaccessible." || exit 1
             }
         STORAGE[FILEPICKEDPATH]=true
     fi
@@ -319,8 +319,8 @@ for _drive in $(getStorageItemIndexesOfType drive); do
         exit 1
     else
         alertLog "\nPreparing to erase drive $_drive... ${_SIM}"
-#DEBUG        ${SIM:-false} || countdownMsg 5 "Erasing drive ${ACTIVE[DEVPATH]}"
-        ${SIM:-false} || print "Erasing drive ${ACTIVE[DEVPATH]}"
+        ${TEST:-false} && _c=0 || _c=5
+        ${SIM:-false} || countdownMsg $_c "Erasing drive ${ACTIVE[DEVPATH]}"
         evalSim  sgdisk --zap-all ${ACTIVE[DEVPATH]} # erase everything!
         evalSim  sgdisk --clear ${ACTIVE[DEVPATH]}   # create new gpt structure
         ${SIM:-false} || successLog "Drive ${ACTIVE[DEVPATH]} erased!"
@@ -381,8 +381,6 @@ else
         "drive without a partition.\nPROCEEDING..."
 fi
 
-evalSim print "this is a test"
-
 :""<< \
 -------------------------------------------------------------------------------
 Encrypting storage
@@ -391,37 +389,32 @@ Encrypting storage
 _encryption=($(getStorageItemIndexesOfType encryption))
 
 if [[ -n "$_encryption" ]]; then
-    # Get passphrase
-    #setPassphrase PASSPHRASE "disk encryption passphrase"
-    PASSPHRASE="abc"
+    # Get passphrase (or use test mode passphrase)
+    ${TEST:-false} && PASSPHRASE="testpassphrase" || \
+        setPassphrase PASSPHRASE "disk encryption passphrase"
     # Encrypt partitions
     for _encrypted_item in ${_encryption}; do
         activateRecord $_encrypted_item
-        progressLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}"
+        printLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}..."
         _ssd="${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
         _ssd="${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
         typeset -a _luks_format _luks_open
         _luks_format=(
-            print -r "$PASSPHRASE" | cryptsetup ${STOROPTS[LUKS,FORMAT]:-}
+            print -r "$PASSPHRASE" "| cryptsetup ${STOROPTS[LUKS,FORMAT]:-}"
             luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}
             )
         _luks_open=(
-            print -r "$PASSPHRASE" | cryptsetup open ${STOROPTS[LUKS,OPEN]:-}
+            print -r "$PASSPHRASE" "| cryptsetup open ${STOROPTS[LUKS,OPEN]:-}"
             ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}
             ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}
             )
-            print ">>>>>>>>>>>>>>>>>"
-        print "$_luks_format"
-            print ">>>>>>>>>>>>>>>>>"
-        print "$_luks_open"
-            print ">>>>>>>>>>>>>>>>>"
-        if ${SIM:-false}; then
-            simPrint "$_luks_format"
-            simPrint $_luks_open
-        else
+        #if ${SIM:-false}; then
+        #    simPrint "$_luks_format"
+        #    simPrint $_luks_open
+        #else
             evalSim ${_luks_format}
             evalSim ${_luks_open}
-        fi
+        #fi
 #        evalSim print -r "$PASSPHRASE" \
 #            | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} \
 #              luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}
