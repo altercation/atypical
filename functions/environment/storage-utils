@@ -364,3 +364,9 @@ activateRecord () {
 getUUIDForDevpath () {
     lsblk -no UUID $1
 }
+
+itemIsInSSD () {
+print "Checking $1"
+    #[[ -n "${STORAGE[${${1}:0,1},SSD]:-}" ]] && return 0 || return 1
+    (( ${+STORAGE[${${1}:0,1},SSD]} ))
+}

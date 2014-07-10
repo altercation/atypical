@@ -96,9 +96,9 @@ STORCMD[ZFS]=''
 
 STOROPTS[MKFS,COMMON]=''
 STOROPTS[MKFS,SSD]=''
-STOROPTS[MKFS,BTRFS]='--force --label $_record_label'
+STOROPTS[MKFS,BTRFS]='--force${ACTIVE[LABEL]:+ --label }${ACTIVE[LABEL]:-}'
 STOROPTS[MKFS,BTRFS,SSD]='--metadata single' # see man mkfs.btrfs
-STOROPTS[MKFS,VFAT]='-F32 -n $_record_label'
+STOROPTS[MKFS,VFAT]='-F32${ACTIVE[LABEL]:+ -n }${ACTIVE[LABEL]:-}'
 STOROPTS[MKFS,VFAT,SSD]=''
 STOROPTS[MKFS,EXFAT]=''
 STOROPTS[MKFS,EXT2]=''
@@ -117,7 +117,7 @@ STOROPTS[MOUNT,COMMON]='rw'
 STOROPTS[MOUNT,SSD]='noatime'
 STOROPTS[MOUNT,BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
 STOROPTS[MOUNT,BTRFS,SSD]='ssd,discard_space'
-STOROPTS[MOUNT,VFAT]='-F32 -n $_record_label'
+STOROPTS[MOUNT,VFAT]='-F32${ACTIVE[LABEL]:+ -n }${ACTIVE[LABEL]:-}'
 STOROPTS[MOUNT,VFAT,SSD]=''
 STOROPTS[MOUNT,EXFAT]=''
 STOROPTS[MOUNT,EXT2]=''
@@ -402,7 +402,11 @@ if [[ -n "$_encryption" ]]; then
     for _encrypted_item in ${_encryption}; do
         activateRecord $_encrypted_item
         printLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}..."
-        _ssd="${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
+        if itemIsInSSD $_encrypted_item; then
+            _ssd="${STOROPTS[LUKS,OPEN,SSD]:-}}"
+        else
+            _ssd=""
+        fi
         typeset -a _luks_format _luks_open
         _luks_format=(
             print -r "$PASSPHRASE" "| cryptsetup ${STOROPTS[LUKS,FORMAT]:-}"
@@ -411,6 +415,7 @@ if [[ -n "$_encryption" ]]; then
         _luks_open=(
             print -r "$PASSPHRASE" "| cryptsetup open ${STOROPTS[LUKS,OPEN]:-}"
             ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}
+            ${_ssd}
             ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]}
             )
         evalSim ${_luks_format}
@@ -431,13 +436,18 @@ if (( ${#_swap} > 1 )); then
     exit 1
 elif (( ${#_swap} == 1 )); then
     activateRecord ${_swap}
+    if itemIsInSSD $_swap; then
+        _ssd="--discard"
+    else
+        _ssd=""
+    fi
     if (( ${+ACTIVE[LABEL]} )); then
         evalSim mkswap -L ${ACTIVE[LABEL]} ${ACTIVE[DEVPATH]}
-        evalSim swapon -L ${ACTIVE[LABEL]:-}
+        evalSim swapon -L ${ACTIVE[LABEL]:-} ${_ssd}
     else
         typeset _uuid=$(getUUIDForDevpath ${ACTIVE[DEVPATH]})
         evalSim mkswap -U $_uuid ${ACTIVE[DEVPATH]}
-        evalSim swapon -U $_uuid ${ACTIVE[LABEL]:-}
+        evalSim swapon -U $_uuid ${ACTIVE[LABEL]:-} ${_ssd}
     fi
     (( $? == 0 )) && successLog "Successfully activated Swap" || {
         errorLog "Failed to create/activate swap"; exit 1; }
@@ -448,19 +458,26 @@ fi
 Initializing filesystems
 -------------------------------------------------------------------------------
 for _filesystem in $(getStorageItemIndexesOfType filesystem); do
-    activateRecord $_encrypted_item
+    activateRecord $_filesystem
     printLog "Creating ${ACTIVE[FSTYPE]} filesystem in ${ACTIVE[DEVPATH]}..."
-    _ssd="${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[MKFS,${(U)ACTIVE[FSTYPE]},SSD]:-}}"
+    if itemIsInSSD $_filesystem; then
+        print "SSD TRUE"
+        _ssd="${STOROPTS[MKFS,${(U)ACTIVE[FSTYPE]},SSD]:-}}"
+    else
+        print "SSD FALSE"
+        _ssd=""
+    fi
     typeset -a _mkfs_options
     _mkfs_options=(
         ${STOROPTS[MKFS,${(U)ACTIVE[FSTYPE]}]:-}
-        $_ssd
-        ${ACTIVE[MOUNTOPTS]}
+        ${_ssd}
+        ${ACTIVE[MOUNTOPTS]:-}
         )
-    evalSim mkfs.${(L)ACTIVE[FSTYPE]} $_mkfs_options ${ACTIVE[DEVPATH]}
+        evalSim mkfs.${(L)ACTIVE[FSTYPE]} ${(e)_mkfs_options} ${ACTIVE[DEVPATH]}
 done
 exit
 
+:<< EOF
 # THIRD PASS: isn't luks, is a "child of" but NOT of luks, so probably special case of btrfs subvolumes (or LVM if I choose to implement it)
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     setActiveStorageRecordWithPrefix $_record_index _record
@@ -566,5 +583,6 @@ for _mount_point in $MOUNT_POINTS; do
     unsetActiveStorageRecordWithPrefix _record
 
 done
+EOF
 
 # vim: set filetype=sh :
