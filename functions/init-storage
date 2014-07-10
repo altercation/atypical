@@ -421,7 +421,6 @@ if [[ -n "$_encryption" ]]; then
 else
     successLog "No encrypted storage items found; skipping encryption."
 fi
-exit
 
 :""<< \
 -------------------------------------------------------------------------------
