@@ -433,7 +433,7 @@ if (( ${#_swap} > 1 )); then
 elif (( ${#_swap} == 1 )); then
     activateRecord ${_swap}
     evalSim mkswap --label ${ACTIVE[LABEL]} ${ACTIVE[DEVPATH]}
-    evalSim swapon -L ${ACTIVE[LABEL]}
+    evalSim swapon ${ACTIVE[LABEL]:+-L} ${ACTIVE[LABEL]:-}
     $? && successLog "Successfully activated Swap" || {
         errorLog "Failed to create/activate swap"; exit 1; }
 fi
