@@ -1,6 +1,6 @@
 # comment
 drive --devpath=/dev/sda --ssd
-    partition --size 100M --bootable --label BOOTPART --code MyXXXXXCODE
+    partition --size 100M --bootable --label BOOTPART
         encryption
             filesystem --fstype fat --mountpoint /boot
     partition --size max --label "SYS PART"
