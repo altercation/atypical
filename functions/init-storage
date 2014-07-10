@@ -395,17 +395,16 @@ if [[ -n "$_encryption" ]]; then
         activateRecord $_encrypted_item
         progressLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}"
         print "${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}"
-        typeset _luks_format="print -r "$PASSPHRASE" | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}"
-        typeset _luks_open="print -r "$PASSPHRASE" | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}"
-        print "SIM IS ${SIM:-false}"
+        typeset _luks_format='print -r "$PASSPHRASE" | cryptsetup \
+            ${STOROPTS[LUKS,FORMAT]:-} luksFormat \
+            ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}'
+        typeset _luks_open='print -r "$PASSPHRASE" | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}'
         if ${SIM:-false}; then
-            print ">>>>>"
             simPrint $_luks_format
             simPrint $_luks_open
         else
-            print "<<<<<"
-            evalSim ${(Q)_luks_format}
-            evalSim ${(Q)_luks_open}
+            evalSim ${_luks_format}
+            evalSim ${_luks_open}
         fi
 #        evalSim print -r "$PASSPHRASE" \
 #            | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} \
