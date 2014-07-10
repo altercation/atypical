@@ -447,7 +447,7 @@ fi
 -------------------------------------------------------------------------------
 Initializing filesystems
 -------------------------------------------------------------------------------
-for _filesystem in ($(getStorageItemIndexesOfType filesystem)); do
+for _filesystem in $(getStorageItemIndexesOfType filesystem); do
     activateRecord $_encrypted_item
     printLog "Creating ${ACTIVE[FSTYPE]} filesystem in ${ACTIVE[DEVPATH]}..."
     _ssd="${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[MKFS,${(U)ACTIVE[FSTYPE]},SSD]:-}}"
