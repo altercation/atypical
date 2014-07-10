@@ -15,7 +15,7 @@ typeIsValidStorageType () {
     typeset _type="$1"
     typeset -A VALID
     VALID=(TYPES "drive partition logical encryption filesystem subvolume swap")
-    [[ ${(L)_type =~ "dis" ]] && _extra="Did you mean to use \'drive\'?" || :
+    [[ ${(L)_type} =~ "dis" ]] && _extra="\nDid you mean to use \'drive\'?" || :
     valueIsInList --value $_type --list "${VALID[TYPES]}" && return 0 || \
         errorLog "\'$_type\' is not a valid storage type.${_extra:-}"
     }
