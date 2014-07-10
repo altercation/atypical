@@ -4,7 +4,7 @@
 # of git and the cloning of the atypical repo.
 #
 # can be accessed using a convenience url:
-# curl -L http://links.ethanschoonover.com/atypical
+# curl -L http://links.ethanschoonover.com/atypical | zsh
 
 cat > /tmp/bootstrap << 'EOF'
 pacman --noconfirm -Sy git;

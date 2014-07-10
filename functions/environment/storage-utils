@@ -230,6 +230,15 @@ while (( ${#PAYLOAD} )); do
 done
 }
 
+getUnmountedDrives () {
+    typeset -a drives
+    drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+    for drive in $drives; do
+        { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $drive)" ]] \
+          || mount | grep $drive; } && drives=("${(@)drives:#$drive}") || :
+    done
+    print "$drives"
+}
 selectDrive () {
     varname=$1
     typeset -a drives

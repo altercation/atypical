@@ -212,6 +212,7 @@ Identifying installation drive(s)
 # If a drive devpath is not set (normally will be unset), prompt for it here
 
 _drives=($(getStorageItemIndexesOfType drive))
+_unmounted_drives="$(getUnmountedDrives)"
 for _drive in $_drives
 do
     debugLog "Checking drive $_drive"
@@ -234,10 +235,15 @@ do
         # set a flag so that we know a drive device path has been picked using
         # a value from the storage file... we want to confirm again if this is
         # the case...
+        valueIsInList --value ${STORAGE[$_drive,DEVPATH]} --list "$_unmounted_drives" || {
+             errorLog "${STORAGE[$_drive,DEVPATH]} is specified explicitly in storage" \
+                      "definition file but is currently\nmounted or inaccessible."
+             exit 1
+            }
         STORAGE[FILEPICKEDPATH]=true
     fi
-
 done
+exit
 
 # if any of the drive paths were set directly from the storage file, confirm
 # before proceeding (no auto erasure)
