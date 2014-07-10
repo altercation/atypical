@@ -401,8 +401,8 @@ if [[ -n "$_encryption" ]]; then
         typeset _luks_open="evalSim print -r "$PASSPHRASE" | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}"
         if ${SIM:-false}; then
             print ">>>>>"
-            simLog $_luks_format
-            simLog $_luks_open
+            simPrint $_luks_format
+            simPrint $_luks_open
         else
             print "<<<<<"
             evalSim $_luks_format
