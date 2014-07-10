@@ -440,7 +440,7 @@ elif (( ${#_swap} == 1 )); then
         evalSim mkswap -U $_uuid ${ACTIVE[DEVPATH]}
         evalSim swapon -U $_uuid ${ACTIVE[LABEL]:-}
     fi
-    $? && successLog "Successfully activated Swap" || {
+    (( $? == 0 )) && successLog "Successfully activated Swap" || {
         errorLog "Failed to create/activate swap"; exit 1; }
 fi
 exit
