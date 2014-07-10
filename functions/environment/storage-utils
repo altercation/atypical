@@ -44,7 +44,7 @@ itemHasRequiredOptions () {
     REQUIRED=(
         DRIVE ""
         PARTITION "size"
-        ENCRYPTION ""
+        ENCRYPTION "label"
         FILESYSTEM "fstype mountpoint"
         SWAP ""
         )
