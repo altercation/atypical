@@ -360,3 +360,7 @@ activateRecord () {
         ACTIVE[${_key#$1,}]="${STORAGE[$_key]}"
     done
 }
+
+getUUIDForDevpath () {
+    lsblk -no UUID $1
+}
