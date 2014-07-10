@@ -49,8 +49,12 @@ Initialize variables and check arguments
 [[ -n "${MOUNTROOT:-}" ]] \
     && MOUNTROOT="${MOUNTROOT:-}" || MOUNTROOT="${2:-/mnt}"
 
+# set RAM and ram here; partition --size should be set to value "ram" with no
+# leading "$", but in case it is, we'll set this here to not fail hard on
+# what otherwise is an intuitive use of a variable. for reference, however,
+# the storage definition file should use "partition --size ram"
 RAM=$(print "$(( $(print ${$(cat /proc/meminfo \
-    | grep -i memtotal)[2]}) / 1000000 ))G")
+    | grep -i memtotal)[2]}) / 1000000 ))G"); ram=$RAM
 
 # fail if missing storage table filename/path argyment
 [[ -n ${STORAGE_FILE:=${1:-}} ]] \
@@ -360,6 +364,8 @@ then
             _id=${ACTIVE[DEVPATH][-1]}
             if [[ ${(L)ACTIVE[SIZE]} =~ "^max" ]]; then
                 _sgdisk_cmd+=("--largest-new=${_id}")
+            elif [[ ${(L)ACTIVE[SIZE]} =~ "ram" ]]; then
+                _sgdisk_cmd+=("--new=${_id}:0:+$RAM")
             else
                 _sgdisk_cmd+=("--new=${_id}:0:+${ACTIVE[SIZE]}")
             fi
@@ -408,20 +414,8 @@ if [[ -n "$_encryption" ]]; then
             ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}
             ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]}
             )
-        #if ${SIM:-false}; then
-        #    simPrint "$_luks_format"
-        #    simPrint $_luks_open
-        #else
-            evalSim ${_luks_format}
-            evalSim ${_luks_open}
-        #fi
-#        evalSim print -r "$PASSPHRASE" \
-#            | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} \
-#              luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}
-#        evalSim print -r "$PASSPHRASE" \
-#            | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} \
-#            ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}} \
-#            ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}
+        evalSim ${_luks_format}
+        evalSim ${_luks_open}
     done
     unset PASSPHRASE
 else
@@ -437,24 +431,14 @@ _swap=($(getStorageItemIndexesOfType swap))
 if (( ${#_swap} > 1 )); then
     errorLog "Multiple swap partitions listed; there can be only one."
     exit 1
+elif (( ${#_swap} == 1 )); then
+    activateRecord ${_swap}
+    evalSim mkswap --label ${ACTIVE[LABEL]} ${ACTIVE[DEVPATH]}
+    evalSim swapon -L ${ACTIVE[LABEL]}
+    $? && successLog "Successfully activated Swap" || {
+        errorLog "Failed to create/activate swap"; exit 1; }
 fi
 exit
-
-    for _encrypted_item in ${_encryption}; do
-        activateRecord $_encrypted_item
-        print "Encrypting $_record_label on $_record_device_path ... "
-            print -r "$PASSPHRASE" \
-                | cryptsetup ${STOROPTS[LUKS,FORMAT]:-} \
-                  luksFormat $_record_device_path
-            print -r "$PASSPHRASE" \
-                | cryptsetup open ${STOROPTS[LUKS,OPEN]:-} \
-                  ${ACTIVE[PARENT]:-${LUKS_OPTIONS[LUKS,OPEN,SSD]:-}} \
-                  $_record_device_path $_record_label
-    done
-    unset PASSPHRASE
-else
-    successLog "No encrypted storage items found; skipping encryption."
-fi
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -466,43 +450,12 @@ Initializing filesystems
                                     ${_record_mkfs_options:-})
             eval mkfs.${(L)_record_fstype} $_mkfs_options_compiled \
                                            $_record_device_path
-# FIRST PASS: isn't luks, doesn't have "child of"
-# (so should be our top level physical partitions)
-for _record_index in {1..$NUM_STORAGE_RECORDS}; do
-    setActiveStorageRecordWithPrefix $_record_index _record
-    if [[ ${(L)_record_fstype} != luks && -z ${_record_child_of:-} ]]; then
-        if [[ ${(L)_record_fstype} == swap  ]]; then
-            eval mkswap --label $_record_label $_record_device_path
-            eval swapon -L $_record_label
-        else
+
             _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
                                     ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
                                     ${_record_mkfs_options:-})
             eval mkfs.${(L)_record_fstype} $_mkfs_options_compiled \
                                            $_record_device_path
-        fi
-    fi
-    unsetActiveStorageRecordWithPrefix _record
-done
-
-# SECOND PASS: isn't luks itself but is "child of" luks
-# (filesystems installed on luks)
-for _record_index in {1..$NUM_STORAGE_RECORDS}; do
-    setActiveStorageRecordWithPrefix $_record_index _record
-    if [[ ${(L)_record_fstype} != luks \
-       && ${(L)_record_parent_fstype:-} == luks ]]; then
-        if [[ ${(L)_record_fstype} == swap  ]]; then
-            eval mkswap --label $_record_label $_record_device_path
-            eval swapon -L $_record_label
-        else
-            _mkfs_options_compiled=(${MKFS_OPTIONS[${(U)_record_fstype}]:-}
-                                    ${MKFS_OPTIONS[${(U)_record_fstype},SSD]:-}
-                                    ${_record_mkfs_options:-})
-            eval mkfs.${(L)_record_fstype} $_mkfs_options_compiled ${_record_device_path}
-        fi
-    fi
-    unsetActiveStorageRecordWithPrefix _record
-done
 
 # THIRD PASS: isn't luks, is a "child of" but NOT of luks, so probably special case of btrfs subvolumes (or LVM if I choose to implement it)
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
