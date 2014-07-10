@@ -367,8 +367,8 @@ then
             fi
             #[[ -z "${ACTIVE[CODE]:-}" ]] || \
             #    _sgdisk_cmd+=("--typecode=${_id}:${ACTIVE[CODE]}")
-            _sgdisk_cmd+=("${ACTIVE[CODE]:+--typecode=${_id}:${ACTIVE[CODE]}}")
-            _sgdisk_cmd+=("${ACTIVE[LABEL]:+--typecode=${_id}:${ACTIVE[LABEL]}}")
+            _sgdisk_cmd+=(${ACTIVE[CODE]:+--typecode=${_id}:${ACTIVE[CODE]}})
+            _sgdisk_cmd+=(${ACTIVE[LABEL]:+--typecode=${_id}:${(q-)ACTIVE[LABEL]}})
         done
         # TODO: do I need to set a default code if absent?
         evalSim sgdisk $_sgdisk_cmd
@@ -379,8 +379,6 @@ else
         "specified a\nfilesystem type that can be initialized directly to a" \
         "drive without a partition.\nPROCEEDING..."
 fi
-
-evalSim print "This is a test"
 
 :""<< \
 -------------------------------------------------------------------------------
