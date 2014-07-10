@@ -5,8 +5,6 @@ drive --devpath=/dev/sda --ssd
             filesystem --fstype fat --mountpoint /boot
     partition --size ram
         swap
-    partition --size ram
-        swap
     partition --size max --label "SYS PART"
             filesystem --fstype btrfs --mountpoint /
 
