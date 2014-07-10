@@ -319,7 +319,8 @@ for _drive in $(getStorageItemIndexesOfType drive); do
         exit 1
     else
         alertLog "\nPreparing to erase drive $_drive... ${_SIM}"
-        ${SIM:-false} || countdownMsg 5 "Erasing drive ${ACTIVE[DEVPATH]}"
+#DEBUG        ${SIM:-false} || countdownMsg 5 "Erasing drive ${ACTIVE[DEVPATH]}"
+        ${SIM:-false} || print "Erasing drive ${ACTIVE[DEVPATH]}"
         evalSim  sgdisk --zap-all ${ACTIVE[DEVPATH]} # erase everything!
         evalSim  sgdisk --clear ${ACTIVE[DEVPATH]}   # create new gpt structure
         ${SIM:-false} || successLog "Drive ${ACTIVE[DEVPATH]} erased!"
@@ -391,7 +392,8 @@ _encryption=($(getStorageItemIndexesOfType encryption))
 
 if [[ -n "$_encryption" ]]; then
     # Get passphrase
-    setPassphrase PASSPHRASE "disk encryption passphrase"
+    #setPassphrase PASSPHRASE "disk encryption passphrase"
+    PASSPHRASE="abc"
     # Encrypt partitions
     for _encrypted_item in ${_encryption}; do
         activateRecord $_encrypted_item
@@ -404,7 +406,7 @@ if [[ -n "$_encryption" ]]; then
             luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}
             )
         _luks_open=(
-            print -r "$PASSPHRASE"| cryptsetup open ${STOROPTS[LUKS,OPEN]:-}
+            print -r "$PASSPHRASE" | cryptsetup open ${STOROPTS[LUKS,OPEN]:-}
             ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}
             ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]:-}
             )
