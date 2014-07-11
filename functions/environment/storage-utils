@@ -46,6 +46,7 @@ itemHasRequiredOptions () {
         PARTITION "size"
         ENCRYPTION "label"
         FILESYSTEM "fstype mountpoint"
+        SUBVOLUME "mountpoint"
         SWAP ""
         )
     for _item_req in ${(ps: :)REQUIRED[$_item_type]}

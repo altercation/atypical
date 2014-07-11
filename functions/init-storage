@@ -75,67 +75,75 @@ Setting storage options
 # be replaced at run time (e.g. $_record_label to use the LABEL field
 # value for the record which the option will be applied to).
 
-typeset -A STOROPTS STORCMD
+typeset -A VALID
 
-STORCMD[BTRFS]=''
-STORCMD[BTRFS]=''
-STORCMD[VFAT]=''
-STORCMD[VFAT,SSD]=''
-STORCMD[EXFAT]=''
-STORCMD[EXT2]=''
-STORCMD[EXT3]=''
-STORCMD[EXT4]=''
-STORCMD[F2FS]=''
-STORCMD[JFS]=''
-STORCMD[NILFS2]=''
-STORCMD[NTFS]=''
-STORCMD[REISER4]=''
-STORCMD[REISERFS]=''
-STORCMD[XFS]=''
-STORCMD[ZFS]=''
+VALID[FSTYPES]="btrfs vfat exfat ext2 ext3 ext4 f2fs jfs nilfs2 ntfs reiser4 reiserfs xfs zfs"
 
-STOROPTS[MKFS,COMMON]=''
-STOROPTS[MKFS,SSD]=''
-STOROPTS[MKFS,BTRFS]='--force${ACTIVE[LABEL]:+ --label }${ACTIVE[LABEL]:-}'
-STOROPTS[MKFS,BTRFS,SSD]='--metadata single' # see man mkfs.btrfs
-STOROPTS[MKFS,VFAT]='-F32${ACTIVE[LABEL]:+ -n }${ACTIVE[LABEL]:-}'
-STOROPTS[MKFS,VFAT,SSD]=''
-STOROPTS[MKFS,EXFAT]=''
-STOROPTS[MKFS,EXT2]=''
-STOROPTS[MKFS,EXT3]=''
-STOROPTS[MKFS,EXT4]=''
-STOROPTS[MKFS,F2FS]=''
-STOROPTS[MKFS,JFS]=''
-STOROPTS[MKFS,NILFS2]=''
-STOROPTS[MKFS,NTFS]=''
-STOROPTS[MKFS,REISER4]=''
-STOROPTS[MKFS,REISERFS]=''
-STOROPTS[MKFS,XFS]=''
-STOROPTS[MKFS,ZFS]=''
+typeset -A MKFS
 
-STOROPTS[MOUNT,COMMON]='rw'
-STOROPTS[MOUNT,SSD]='noatime'
-STOROPTS[MOUNT,BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
-STOROPTS[MOUNT,BTRFS,SSD]='ssd,discard_space'
-STOROPTS[MOUNT,VFAT]='-F32${ACTIVE[LABEL]:+ -n }${ACTIVE[LABEL]:-}'
-STOROPTS[MOUNT,VFAT,SSD]=''
-STOROPTS[MOUNT,EXFAT]=''
-STOROPTS[MOUNT,EXT2]=''
-STOROPTS[MOUNT,EXT3]=''
-STOROPTS[MOUNT,EXT4]=''
-STOROPTS[MOUNT,F2FS]=''
-STOROPTS[MOUNT,JFS]=''
-STOROPTS[MOUNT,NILFS2]=''
-STOROPTS[MOUNT,NTFS]=''
-STOROPTS[MOUNT,REISER4]=''
-STOROPTS[MOUNT,REISERFS]=''
-STOROPTS[MOUNT,XFS]=''
-STOROPTS[MOUNT,ZFS]=''
+MKFS[CMD,BTRFS]=''
+MKFS[CMD,BTRFS]=''
+MKFS[CMD,VFAT]=''
+MKFS[CMD,VFAT,SSD]=''
+MKFS[CMD,EXFAT]=''
+MKFS[CMD,EXT2]=''
+MKFS[CMD,EXT3]=''
+MKFS[CMD,EXT4]=''
+MKFS[CMD,F2FS]=''
+MKFS[CMD,JFS]=''
+MKFS[CMD,NILFS2]=''
+MKFS[CMD,NTFS]=''
+MKFS[CMD,REISER4]=''
+MKFS[CMD,REISERFS]=''
+MKFS[CMD,XFS]=''
+MKFS[CMD,ZFS]=''
+
+MKFS[OPTIONS,COMMON]=''
+MKFS[OPTIONS,SSD]=''
+MKFS[OPTIONS,BTRFS]='--force${ACTIVE[LABEL]:+ --label }${ACTIVE[LABEL]:-}'
+MKFS[OPTIONS,BTRFS,SSD]='--metadata single' # see man mkfs.btrfs
+MKFS[OPTIONS,VFAT]='-F32${ACTIVE[LABEL]:+ -n }${ACTIVE[LABEL]:-}'
+MKFS[OPTIONS,VFAT,SSD]=''
+MKFS[OPTIONS,EXFAT]=''
+MKFS[OPTIONS,EXT2]=''
+MKFS[OPTIONS,EXT3]=''
+MKFS[OPTIONS,EXT4]=''
+MKFS[OPTIONS,F2FS]=''
+MKFS[OPTIONS,JFS]=''
+MKFS[OPTIONS,NILFS2]=''
+MKFS[OPTIONS,NTFS]=''
+MKFS[OPTIONS,REISER4]=''
+MKFS[OPTIONS,REISERFS]=''
+MKFS[OPTIONS,XFS]=''
+MKFS[OPTIONS,ZFS]=''
+
+typeset -A MOUNTOPTIONS
+
+MOUNTOPTIONS[COMMON]='rw'
+MOUNTOPTIONS[SSD]='noatime'
+MOUNTOPTIONS[BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
+MOUNTOPTIONS[BTRFS,SSD]='ssd,discard_space'
+MOUNTOPTIONS[VFAT]='-F32${ACTIVE[LABEL]:+ -n }${ACTIVE[LABEL]:-}'
+MOUNTOPTIONS[VFAT,SSD]=''
+MOUNTOPTIONS[EXFAT]=''
+MOUNTOPTIONS[EXT2]=''
+MOUNTOPTIONS[EXT3]=''
+MOUNTOPTIONS[EXT4]=''
+MOUNTOPTIONS[F2FS]=''
+MOUNTOPTIONS[JFS]=''
+MOUNTOPTIONS[NILFS2]=''
+MOUNTOPTIONS[NTFS]=''
+MOUNTOPTIONS[REISER4]=''
+MOUNTOPTIONS[REISERFS]=''
+MOUNTOPTIONS[XFS]=''
+MOUNTOPTIONS[ZFS]=''
+
+typeset -A LUKS
 
 # Note that --force-password allows weak passphrases (for testing only)
-STOROPTS[LUKS,FORMAT]='--force-password'
-STOROPTS[LUKS,OPEN]=''
-STOROPTS[LUKS,OPEN,SSD]='--allow-discards'
+LUKS[FORMAT]='--force-password'
+LUKS[OPEN]=''
+LUKS[OPEN,SSD]='--allow-discards'
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -189,7 +197,7 @@ Processing storage table values
 # here as this is the one stop location for adding/removing/renaming.
 typeset -a STOROPTS_SCAL STOROPTS_BOOL
 STOROPTS_BOOL=(bootable noclobber ssd)
-STOROPTS_SCAL=(devpath fstype label code mountopts mountpoint size type)
+STOROPTS_SCAL=(devpath fstype label code mkfsoptions mountoptions mountpoint size type)
 
 # a little too dependent on state, but it's not easy to functionally
 # pass associative arrays around so this will write out to the
@@ -290,24 +298,28 @@ done
 :<< \
 -------------------------------------------------------------------------------
 DESTRUCTION FOLLOWS!
+If in test mode, close encrypted volumes, shut down swap and unmount
+known mounts
 -------------------------------------------------------------------------------
 ${SIM:-false} || :""""<<< "INSTALLATION BEGINNING... DATA WILL BE ERASED!"
-
-:<< \
-'-------------------------------------------------------------------------------'
-DEBUG for second pass
-# DEBUGGING - turn off active swap
-swapoff -a
-
-# DEBUGGING close any open crypt devices 
-for _record_index in {1..$NUM_STORAGE_RECORDS}; do
-    setActiveStorageRecordWithPrefix $_record_index _record
-    if [[ ${(L)_record_fstype} == luks ]]; then
-        cryptsetup close $_record_label &>/dev/null || :
-    fi
-    unsetActiveStorageRecordWithPrefix _record
-done
--------------------------------------------------------------------------------
+if ${TEST:-false}; then
+    printLog "\nTEST MODE: Closing known encrypted and swap items"
+    _encryption=($(getStorageItemIndexesOfType encryption))
+    for _encrypted_item in ${_encryption}; do
+        activateRecord $_encrypted_item
+        ${SIM:-false} || cryptsetup close ${ACTIVE[LABEL]} || :
+    done
+    _swap=($(getStorageItemIndexesOfType swap))
+    for _swap_item in ${_swap}; do
+        activateRecord $_encrypted_item
+        if (( ${+ACTIVE[LABEL]} )); then
+            ${SIM:-false} || swapoff -L ${ACTIVE[LABEL]}
+        else
+            typeset _uuid=$(getUUIDForDevpath ${ACTIVE[DEVPATH]})
+            ${SIM:-false} || swapoff -U $_uuid
+        fi
+    done
+fi
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -391,9 +403,7 @@ fi
 -------------------------------------------------------------------------------
 Encrypting storage
 -------------------------------------------------------------------------------
-
 _encryption=($(getStorageItemIndexesOfType encryption))
-
 if [[ -n "$_encryption" ]]; then
     # Get passphrase (or use test mode passphrase)
     ${TEST:-false} && PASSPHRASE="testpassphrase" || \
@@ -403,18 +413,18 @@ if [[ -n "$_encryption" ]]; then
         activateRecord $_encrypted_item
         printLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}..."
         if itemIsInSSD $_encrypted_item; then
-            _ssd="${STOROPTS[LUKS,OPEN,SSD]:-}}"
+            _ssd="${LUKS[OPEN,SSD]:-}}"
         else
             _ssd=""
         fi
         typeset -a _luks_format _luks_open
         _luks_format=(
-            print -r "$PASSPHRASE" "| cryptsetup ${STOROPTS[LUKS,FORMAT]:-}"
+            print -r "$PASSPHRASE" "| cryptsetup ${LUKS[FORMAT]:-}"
             luksFormat ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}
             )
         _luks_open=(
-            print -r "$PASSPHRASE" "| cryptsetup open ${STOROPTS[LUKS,OPEN]:-}"
-            ${STORAGE[${_encrypted_item:0,1},SSD]:+${STOROPTS[LUKS,OPEN,SSD]:-}}
+            print -r "$PASSPHRASE" "| cryptsetup open ${LUKS[OPEN]:-}"
+            ${STORAGE[${_encrypted_item:0,1},SSD]:+${LUKS[OPEN,SSD]:-}}
             ${_ssd}
             ${STORAGE[${ACTIVE[PARENT]},DEVPATH]} ${ACTIVE[LABEL]}
             )
@@ -460,30 +470,59 @@ Initializing filesystems
 for _filesystem in $(getStorageItemIndexesOfType filesystem); do
     activateRecord $_filesystem
     printLog "Creating ${ACTIVE[FSTYPE]} filesystem in ${ACTIVE[DEVPATH]}..."
-    if itemIsInSSD $_filesystem; then
+    itemIsInSSD $_filesystem \
+        && {
         print "SSD TRUE"
-        _ssd="${STOROPTS[MKFS,${(U)ACTIVE[FSTYPE]},SSD]:-}}"
-    else
+        _ssd="${MKFS[${(U)ACTIVE[FSTYPE]},SSD]:-}}"
+        } || {
         print "SSD FALSE"
         _ssd=""
-    fi
+        }
     typeset -a _mkfs_options
     _mkfs_options=(
-        ${STOROPTS[MKFS,${(U)ACTIVE[FSTYPE]}]:-}
+        ${MKFS[${(U)ACTIVE[FSTYPE]}]:-}
         ${_ssd}
-        ${ACTIVE[MOUNTOPTS]:-}
+        ${ACTIVE[MKFSOPTIONS]:-}
         )
         evalSim mkfs.${(L)ACTIVE[FSTYPE]} ${(e)_mkfs_options} ${ACTIVE[DEVPATH]}
 done
 
 :""<< \
 -------------------------------------------------------------------------------
-Mounting filesystems
+Mounting filesystems and initializing subvolumes
 -------------------------------------------------------------------------------
-for _mountpoint in ${(ko)STORAGE[(I)*,MOUNTPOINT]}
-    print "MOUNTPOINT: ${STORAGE[$_mountpoint]}"
-    #activateRecord $_filesystem
+# create ordered list of mountpoints so we mount them in the right order
+typeset -A _mountpoint_list
+typeset -T _MOUNTOPTIONS_CSV _mountoptions ","
+_mountpoint_list=(${(kv)STORAGE[(I)*,MOUNTPOINT]})
+for _mountpoint in ${(vo)_mountpoint_list}
 do
+    activateRecord ${(k)STORAGE[(r)$_mountpoint]%,MOUNTPOINT}
+    if [[ "${ACTIVE[TYPE]}" == "subvolume" ]]
+    then
+        :
+        # make a subvolume, etc.
+    elif [[ "${ACTIVE[TYPE]}" == "filesystem" ]]
+    then
+        :
+        # mount an existing filesystem
+        _mountoptions=()
+        _mountoptions+=(${MOUNTOPTIONS[COMMON]:-})
+        _mountoptions+=("${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]}]:-}")
+        itemIsInSSD $_filesystem && {
+        _mountoptions+=(${MOUNTOPTIONS[SSD]:-})
+        _mountoptions+=(${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]},SSD]:-})
+        } || :
+        _mountoptions+=(${ACTIVE[MOUNTOPTIONS]:-})
+        xxx execute mount command
+        
+    else
+        errorLog "\nStorage item type ${ACTIVE[TYPE]} should not have a" \
+                 "mountpoint as listed in the storage definition file." || :
+        printLog "Ignoring this mountpoint ($_mountpoint)!"
+    fi
+print -n "_MOUNTOPTIONS_CSV "
+print "$_MOUNTOPTIONS_CSV"
 done
 exit
 
@@ -555,7 +594,7 @@ for _mount_point in $MOUNT_POINTS; do
     # (if we are in an encrypted container)
     storageGetLuksAncestorIndex $_record_index &>/dev/null && \
     addToCommaList _mount_options_compiled
-                   ${MOUNT_OPTIONS[LUKS]:-} || :
+                   ${MOUNTOPTIONS[LUKS]:-} || :
 
     # build mount point:
     # --------------------------------------
