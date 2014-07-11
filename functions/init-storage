@@ -81,10 +81,10 @@ VALID[FSTYPES]="btrfs vfat exfat ext2 ext3 ext4 f2fs jfs nilfs2 ntfs reiser4 rei
 
 typeset -A MKFS
 
-MKFS[CMD,BTRFS]=''
+# these commands will only be used if present, otherwise the default
+# mkfs.FILESYSTEMNAME command will be used
 MKFS[CMD,BTRFS]=''
 MKFS[CMD,VFAT]=''
-MKFS[CMD,VFAT,SSD]=''
 MKFS[CMD,EXFAT]=''
 MKFS[CMD,EXT2]=''
 MKFS[CMD,EXT3]=''
@@ -514,8 +514,9 @@ do
         _mountoptions+=(${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]},SSD]:-})
         } || :
         _mountoptions+=(${ACTIVE[MOUNTOPTIONS]:-})
-        xxx execute mount command
-        
+        _mkfs="mkfs.${(l)ACTIVE[FSTYPE]}${DEBUG:+ --verbose }"
+        _cmd=${MKFS[CMD,${(U)ACTIVE[FSTYPE]}]:-$_mkfs}
+        evalSim $_cmd $_mountoptions
     else
         errorLog "\nStorage item type ${ACTIVE[TYPE]} should not have a" \
                  "mountpoint as listed in the storage definition file." || :
