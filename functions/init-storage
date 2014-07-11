@@ -24,6 +24,21 @@ init-storage http://myserver.com/storage
 
 -------------------------------------------------------------------------------
 ' 
+
+:<< \
+-------------------------------------------------------------------------------
+Preload and main execution
+
+Allows all helper functions and details to follow later, keeping the main
+logic up front and visible. Allows functions to be included here rather than
+in a separate file without cluttering up the top of the script.
+-------------------------------------------------------------------------------
+(( ${+PRELOAD} )) || { typeset PRELOAD; . $(readlink -f $0); main; exit 0; }
+
+main () {
+    print "done"
+}
+
 :<< \
 -------------------------------------------------------------------------------
 Script environment
@@ -149,6 +164,7 @@ LUKS[OPEN,SSD]='--allow-discards'
 -------------------------------------------------------------------------------
 Loading & processing atypical storage table file
 -------------------------------------------------------------------------------
+
 # source remote URI or create absolute filepath
 if [[ "$STORAGE_FILE" =~ "(http|ftp)s?:.*" ]]
 then
@@ -195,7 +211,7 @@ Processing storage table values
 # Not all options are valid for all types, but this is at least a basic
 # sanity check. Used in the convertStorageFileToArray function, listed
 # here as this is the one stop location for adding/removing/renaming.
-typeset -a STOROPTS_SCAL STOROPTS_BOOL
+typeset -ga STOROPTS_SCAL STOROPTS_BOOL
 STOROPTS_BOOL=(bootable noclobber ssd)
 STOROPTS_SCAL=(devpath fstype label code mkfsoptions mountoptions mountpoint size type)
 
@@ -204,15 +220,10 @@ STOROPTS_SCAL=(devpath fstype label code mkfsoptions mountoptions mountpoint siz
 # global STORAGE array. This could be passed at least as an explicit
 # --output argument (i.e. the name of the array) but indirect references
 # to associative array values are ridiculous looking in zsh.
-typeset -A STORAGE
+typeset -gA STORAGE
 convertStorageFileToArray --input $STORAGE_FILE \
     && successLog "Storage file successfully converted for processing." \
     || errorLog "Failed to converted storage file for processing." \
-
-# Ordered list of mounts for use in later loops.
-# Useful in particular so that we have a naturally ordered list
-# of mounts from / on down.
-#MOUNTPOINTS=(${(vo)STORAGE[(I)*,MOUNTPOINT]})
 
 :""<< \
 -------------------------------------------------------------------------------
@@ -493,7 +504,7 @@ Mounting filesystems and initializing subvolumes
 -------------------------------------------------------------------------------
 # create ordered list of mountpoints so we mount them in the right order
 typeset -A _mountpoint_list
-typeset -T _MOUNTOPTIONS_CSV _mountoptions ","
+typeset -T _MOUNTOPTIONS_CSV _mountoptions ,
 _mountpoint_list=(${(kv)STORAGE[(I)*,MOUNTPOINT]})
 for _mountpoint in ${(vo)_mountpoint_list}
 do
@@ -514,16 +525,14 @@ do
         _mountoptions+=(${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]},SSD]:-})
         } || :
         _mountoptions+=(${ACTIVE[MOUNTOPTIONS]:-})
-        _mkfs="mkfs.${(l)ACTIVE[FSTYPE]}${DEBUG:+ --verbose }"
+        _mkfs="mkfs.${(L)ACTIVE[FSTYPE]}${DEBUG:+ --verbose }x-mount.mkdir"
         _cmd=${MKFS[CMD,${(U)ACTIVE[FSTYPE]}]:-$_mkfs}
-        evalSim $_cmd $_mountoptions
+        evalSim $_cmd -o ${_MOUNTOPTIONS_CSV//,,/,} ${ACTIVE[DEVPATH]}
     else
         errorLog "\nStorage item type ${ACTIVE[TYPE]} should not have a" \
                  "mountpoint as listed in the storage definition file." || :
         printLog "Ignoring this mountpoint ($_mountpoint)!"
     fi
-print -n "_MOUNTOPTIONS_CSV "
-print "$_MOUNTOPTIONS_CSV"
 done
 exit
 
