@@ -297,10 +297,10 @@ if ${TEST:-false} && ! ${SIM:-false}; then
     for _swap_item in ${_swap}; do
         activateRecord $_encrypted_item
         if (( ${+ACTIVE[LABEL]} )); then
-            ${SIM:-false} || swapoff -L ${ACTIVE[LABEL]}
+            ${SIM:-false} || swapoff -L ${ACTIVE[LABEL]} || :
         else
             typeset _uuid=$(getUUIDForDevpath ${ACTIVE[DEVPATH]})
-            ${SIM:-false} || swapoff -U $_uuid
+            ${SIM:-false} || swapoff -U $_uuid || :
         fi
     done
 fi
