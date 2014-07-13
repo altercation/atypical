@@ -112,7 +112,7 @@ typeset -Ag MOUNTOPTIONS
 MOUNTOPTIONS[COMMON]='defaults,x-mount.mkdir'
 MOUNTOPTIONS[SSD]='noatime'
 MOUNTOPTIONS[BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
-MOUNTOPTIONS[BTRFS,SSD]='ssd,discard_space'
+MOUNTOPTIONS[BTRFS,SSD]='ssd,discard'
 MOUNTOPTIONS[VFAT]='-F32${ACTIVE[LABEL]:+ -n }${ACTIVE[LABEL]:-}'
 MOUNTOPTIONS[VFAT,SSD]=''
 MOUNTOPTIONS[EXFAT]=''
