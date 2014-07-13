@@ -498,7 +498,7 @@ do
             _mountoptions+=(${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]},SSD]:-})
             } || :
         _mountoptions+=(${ACTIVE[MOUNTOPTIONS]:-})
-        _mountcmd="mount ${DEBUG:+ --verbose }x-mount.mkdir"
+        _mountcmd="mount ${DEBUG:+ --verbose }"
         _mountpoint="${MOUNTROOT%/}/${ACTIVE[MOUNTPOINT]#/}"
         evalSim "$_mountcmd -o"\
                  "${_MOUNTOPTIONS_CSV//,,/,}"\
