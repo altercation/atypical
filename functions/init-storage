@@ -27,59 +27,34 @@ init-storage http://myserver.com/storage
 
 :<< \
 -------------------------------------------------------------------------------
-Preload and main execution
-
-Allows all helper functions and details to follow later, keeping the main
-logic up front and visible. Allows functions to be included here rather than
-in a separate file without cluttering up the top of the script.
+MAIN EXECUTION - run all __ functions in order after preloading rest of script
 -------------------------------------------------------------------------------
-(( ${+PRELOAD} )) || { typeset PRELOAD; . $(readlink -f $0); main; exit 0; }
-
-main () {
-    print "done"
-}
+(( ${(P)+${:-PRELOAD_${s::=${${0:t}//-/}}}} )) || { typeset PRELOAD_$s;
+typeset -i i; alias -g "__"='__${s}_$((++i))'; . $(readlink -f $0);
+eval ${(pj:; :)${(nk)functions[(I)__${s}_*]}}; exit; }
 
 :<< \
 -------------------------------------------------------------------------------
-Script environment
+SCRIPT ENVIRONMENT & DEFAULT VALUES
 -------------------------------------------------------------------------------
 # script absolute path, name, and load of common script env, opts, functions
 # if defined already in main atypical script, use those, otherwise redefine
-# here
-(( ${+SCRIPT_ROOT} )) || {
-    SCRIPT_NAME="${${SCRIPT_PATH:=$(readlink -f $0)}:t}"
+(( ${+SCRIPT_ROOT} )) || { # if the script root value is undefined, proceed
+    typeset -g SCRIPT_PATH SCRIPT_NAME="${${SCRIPT_PATH:=$(readlink -f $0)}:t}"
     # we use the actual atypical script root here
-    SCRIPT_ROOT="${${SCRIPT_PATH::=${SCRIPT_PATH:h}}:h}"
-    FUNC_ROOT="${SCRIPT_ROOT}/functions"
-    for _fm in ${FUNC_ROOT}/environment/*; do source ${_fm}; done
-    }
+    typeset -g SCRIPT_ROOT="${${SCRIPT_PATH::=${SCRIPT_PATH:h}}:h}"
+    typeset -g FUNC_ROOT="${SCRIPT_ROOT}/functions"
+    for _fm in ${FUNC_ROOT}/environment/*; do source ${_fm}; done }
 
-:<< \
--------------------------------------------------------------------------------
-Initialize variables and check arguments
--------------------------------------------------------------------------------
-# initial declarations
-# typeset -Ax SCRIPT DATAPATHS AUTOPATHS MANIFEST CONFIG INSTALLER USER STORAGE
+typeset -g MOUNTROOT="${MOUNTROOT:-${2:-/mnt}}"
+[[ -n ${STORAGE_FILE:=${1:-}} ]] || {
+    errorLog "No storage table file specified." || usage 1; }
 
-[[ -n "${MOUNTROOT:-}" ]] \
-    && MOUNTROOT="${MOUNTROOT:-}" || MOUNTROOT="${2:-/mnt}"
+[[ ! -f "${TMPSTOR::=$TMPDIR/storage}" ]] || {
+    errorLog "Temp file collision: $TMPSTOR already exists, but shouldn't!";
+    exit 1; }
 
-# set RAM and ram here; partition --size should be set to value "ram" with no
-# leading "$", but in case it is, we'll set this here to not fail hard on
-# what otherwise is an intuitive use of a variable. for reference, however,
-# the storage definition file should use "partition --size ram"
-RAM=$(print "$(( $(print ${$(cat /proc/meminfo \
-    | grep -i memtotal)[2]}) / 1000000 ))G"); ram=$RAM
-
-# fail if missing storage table filename/path argyment
-[[ -n ${STORAGE_FILE:=${1:-}} ]] \
-    || { errorLog "No storage table file specified." || usage 1; }
-
-TMPSTOR="$TMPDIR/storage"
-[[ -f "$TMPSTOR" ]] \
-    && errorLog "Temp file collision: $TMPSTOR already exists, but shouldn't!"
-
-:<< \
+__ () { :<< \
 -------------------------------------------------------------------------------
 Setting storage options
 -------------------------------------------------------------------------------
@@ -90,14 +65,13 @@ Setting storage options
 # be replaced at run time (e.g. $_record_label to use the LABEL field
 # value for the record which the option will be applied to).
 
-typeset -A VALID
-
+# known filesystem types
+typeset -Ag VALID
 VALID[FSTYPES]="btrfs vfat exfat ext2 ext3 ext4 f2fs jfs nilfs2 ntfs reiser4 reiserfs xfs zfs"
 
-typeset -A MKFS
-
-# these commands will only be used if present, otherwise the default
+# these MKFS[CMD,*] commands will only be used if assigned, otherwise the default
 # mkfs.FILESYSTEMNAME command will be used
+typeset -Ag MKFS
 MKFS[CMD,BTRFS]=''
 MKFS[CMD,VFAT]=''
 MKFS[CMD,EXFAT]=''
@@ -113,6 +87,7 @@ MKFS[CMD,REISERFS]=''
 MKFS[CMD,XFS]=''
 MKFS[CMD,ZFS]=''
 
+# mkfs default options (both common and specific to each fstype)
 MKFS[OPTIONS,COMMON]=''
 MKFS[OPTIONS,SSD]=''
 MKFS[OPTIONS,BTRFS]='--force${ACTIVE[LABEL]:+ --label }${ACTIVE[LABEL]:-}'
@@ -132,8 +107,8 @@ MKFS[OPTIONS,REISERFS]=''
 MKFS[OPTIONS,XFS]=''
 MKFS[OPTIONS,ZFS]=''
 
-typeset -A MOUNTOPTIONS
-
+# mount default options (both common and specific to each fstype)
+typeset -Ag MOUNTOPTIONS
 MOUNTOPTIONS[COMMON]='rw'
 MOUNTOPTIONS[SSD]='noatime'
 MOUNTOPTIONS[BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
@@ -153,18 +128,18 @@ MOUNTOPTIONS[REISERFS]=''
 MOUNTOPTIONS[XFS]=''
 MOUNTOPTIONS[ZFS]=''
 
-typeset -A LUKS
-
+# luks default options (format, open, and ssd specific)
 # Note that --force-password allows weak passphrases (for testing only)
+typeset -A LUKS
 LUKS[FORMAT]='--force-password'
 LUKS[OPEN]=''
 LUKS[OPEN,SSD]='--allow-discards'
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
-Loading & processing atypical storage table file
+Accessing atypical storage table file
 -------------------------------------------------------------------------------
-
+simPrint "\# Storage initialization\n"
 # source remote URI or create absolute filepath
 if [[ "$STORAGE_FILE" =~ "(http|ftp)s?:.*" ]]
 then
@@ -198,15 +173,12 @@ then
 elif [[ ! -f "$STORAGE_FILE" ]]
 then
     errorLog "Could not find storage table file at path $STORAGE_FILE."
-
 fi
 
-
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Processing storage table values
 -------------------------------------------------------------------------------
-
 # The valid options (boolean and scalar separate) for storage items.
 # Not all options are valid for all types, but this is at least a basic
 # sanity check. Used in the convertStorageFileToArray function, listed
@@ -221,18 +193,21 @@ STOROPTS_SCAL=(devpath fstype label code mkfsoptions mountoptions mountpoint siz
 # --output argument (i.e. the name of the array) but indirect references
 # to associative array values are ridiculous looking in zsh.
 typeset -gA STORAGE
+simPrint "\n# Source storage file equivalent to the following.
+# For reference only, unused in this sim file.
+:<< \\\\
+'SOURCE\'"
 convertStorageFileToArray --input $STORAGE_FILE \
     && successLog "Storage file successfully converted for processing." \
-    || errorLog "Failed to converted storage file for processing." \
+    || errorLog "Failed to converted storage file for processing."
+simPrint "SOURCE\n"
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Identifying installation drive(s)
 -------------------------------------------------------------------------------
 # Uses either the preset --devpath value for drives from the storage file or
 # interactively selects the drive
-
-# If a drive devpath is not set (normally will be unset), prompt for it here
 
 _drives=($(getStorageItemIndexesOfType drive))
 _unmounted_drives="$(getUnmountedDrives)"
@@ -258,10 +233,12 @@ do
         # set a flag so that we know a drive device path has been picked using
         # a value from the storage file... we want to confirm again if this is
         # the case...
-        valueIsInList --value ${STORAGE[$_drive,DEVPATH]} --list "$_unmounted_drives" || {
+        valueIsInList --value ${STORAGE[$_drive,DEVPATH]} \
+                      --list "$_unmounted_drives" || {
         $(${TEST:-false} && print "printLog" || print "errorLog") \
-                "${STORAGE[$_drive,DEVPATH]} is specified explicitly in storage" \
-                "definition file but is currently\nmounted or inaccessible." || exit 1
+                "${STORAGE[$_drive,DEVPATH]} is specified explicitly in"\
+                "storage definition file but is currently\nmounted or"\
+                "inaccessible." || exit 1
             }
         STORAGE[FILEPICKEDPATH]=true
     fi
@@ -286,7 +263,7 @@ then
         }
 fi
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Assembling device paths on target drive(s)
 -------------------------------------------------------------------------------
@@ -302,18 +279,14 @@ for _childkey in ${(ovps: :)STORAGE[(I)*CHILDREN]}; do
     done
 done
 
-#debugLog "\n\nOrder of initialization:"
-#debugLog ${STORAGE[CHILDREN]}
-#debugLog ${(ov)STORAGE[(I)*CHILDREN]}
-
-:<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 DESTRUCTION FOLLOWS!
-If in test mode, close encrypted volumes, shut down swap and unmount
-known mounts
+If in test mode and not simulating, close encrypted volumes, shut down swap and
+unmount known mounts
 -------------------------------------------------------------------------------
 ${SIM:-false} || :""""<<< "INSTALLATION BEGINNING... DATA WILL BE ERASED!"
-if ${TEST:-false}; then
+if ${TEST:-false} && ! ${SIM:-false}; then
     printLog "\nTEST MODE: Closing known encrypted and swap items"
     _encryption=($(getStorageItemIndexesOfType encryption))
     for _encrypted_item in ${_encryption}; do
@@ -332,7 +305,7 @@ if ${TEST:-false}; then
     done
 fi
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Erasing/preparing target drive(s)
 -------------------------------------------------------------------------------
@@ -354,7 +327,7 @@ for _drive in $(getStorageItemIndexesOfType drive); do
     fi
 done
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Processing partitions
 -------------------------------------------------------------------------------
@@ -388,7 +361,9 @@ then
             if [[ ${(L)ACTIVE[SIZE]} =~ "^max" ]]; then
                 _sgdisk_cmd+=("--largest-new=${_id}")
             elif [[ ${(L)ACTIVE[SIZE]} =~ "ram" ]]; then
-                _sgdisk_cmd+=("--new=${_id}:0:+$RAM")
+                _ram=$(print "$(( $(print ${$(cat /proc/meminfo \
+                | grep -i memtotal)[2]}) / 1000000 ))G")
+                _sgdisk_cmd+=("--new=${_id}:0:+$_ram")
             else
                 _sgdisk_cmd+=("--new=${_id}:0:+${ACTIVE[SIZE]}")
             fi
@@ -401,7 +376,8 @@ then
             _sgdisk_cmd+=(${ACTIVE[LABEL]:+--change-name=${_id}:${(q-)ACTIVE[LABEL]}})
         done
         _sgdisk_cmd+=($_drive_devpath)
-        evalSim "print 'Partitioning...' && sgdisk $_sgdisk_cmd && print 'Partitions created successfully' || { print 'Partition creation failed'; exit 1; }"
+        #evalSim "print 'Partitioning...' && sgdisk $_sgdisk_cmd && print 'Partitions created successfully' || { print 'Partition creation failed'; exit 1; }"
+        evalSim "sgdisk $_sgdisk_cmd"
     done
 else
     # TODO: can add in an fstype validity check here and remove warning
@@ -410,7 +386,7 @@ else
         "drive without a partition.\nPROCEEDING..."
 fi
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Encrypting storage
 -------------------------------------------------------------------------------
@@ -424,7 +400,7 @@ if [[ -n "$_encryption" ]]; then
         activateRecord $_encrypted_item
         printLog "Encrypting ${STORAGE[${ACTIVE[PARENT]},DEVPATH]}..."
         if itemIsInSSD $_encrypted_item; then
-            _ssd="${LUKS[OPEN,SSD]:-}}"
+            _ssd="${LUKS[OPEN,SSD]:-}"
         else
             _ssd=""
         fi
@@ -447,7 +423,7 @@ else
     successLog "No encrypted storage items found; skipping encryption."
 fi
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Activating swap
 -------------------------------------------------------------------------------
@@ -474,7 +450,7 @@ elif (( ${#_swap} == 1 )); then
         errorLog "Failed to create/activate swap"; exit 1; }
 fi
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Initializing filesystems
 -------------------------------------------------------------------------------
@@ -482,23 +458,18 @@ for _filesystem in $(getStorageItemIndexesOfType filesystem); do
     activateRecord $_filesystem
     printLog "Creating ${ACTIVE[FSTYPE]} filesystem in ${ACTIVE[DEVPATH]}..."
     itemIsInSSD $_filesystem \
-        && {
-        print "SSD TRUE"
-        _ssd="${MKFS[${(U)ACTIVE[FSTYPE]},SSD]:-}}"
-        } || {
-        print "SSD FALSE"
-        _ssd=""
-        }
+        && _ssd="${MKFS[${(U)ACTIVE[FSTYPE]},SSD]:-}" || _ssd=""
     typeset -a _mkfs_options
     _mkfs_options=(
         ${MKFS[${(U)ACTIVE[FSTYPE]}]:-}
         ${_ssd}
         ${ACTIVE[MKFSOPTIONS]:-}
         )
-        evalSim mkfs.${(L)ACTIVE[FSTYPE]} ${(e)_mkfs_options} ${ACTIVE[DEVPATH]}
+        _mkfscmd=${MKFS[CMD,${(U)ACTIVE[FSTYPE]}]:-mkfs.${(L)ACTIVE[FSTYPE]}}
+        evalSim $_mkfscmd ${(e)_mkfs_options} ${ACTIVE[DEVPATH]}
 done
 
-:""<< \
+}; __ () { :""<< \
 -------------------------------------------------------------------------------
 Mounting filesystems and initializing subvolumes
 -------------------------------------------------------------------------------
@@ -521,22 +492,23 @@ do
         _mountoptions+=(${MOUNTOPTIONS[COMMON]:-})
         _mountoptions+=("${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]}]:-}")
         itemIsInSSD $_filesystem && {
-        _mountoptions+=(${MOUNTOPTIONS[SSD]:-})
-        _mountoptions+=(${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]},SSD]:-})
-        } || :
+            _mountoptions+=(${MOUNTOPTIONS[SSD]:-})
+            _mountoptions+=(${MOUNTOPTIONS[${(U)ACTIVE[FSTYPE]},SSD]:-})
+            } || :
         _mountoptions+=(${ACTIVE[MOUNTOPTIONS]:-})
-        _mkfs="mkfs.${(L)ACTIVE[FSTYPE]}${DEBUG:+ --verbose }x-mount.mkdir"
-        _cmd=${MKFS[CMD,${(U)ACTIVE[FSTYPE]}]:-$_mkfs}
-        evalSim $_cmd -o ${_MOUNTOPTIONS_CSV//,,/,} ${ACTIVE[DEVPATH]}
+        _mountcmd="mount ${DEBUG:+ --verbose }x-mount.mkdir"
+        _mountpoint="${MOUNTROOT%/}/${ACTIVE[MOUNTPOINT]#/}"
+        evalSim "$_mountcmd -o"\
+                 "${_MOUNTOPTIONS_CSV//,,/,}"\
+                 "${ACTIVE[DEVPATH]} ${_mountpoint%/}"
     else
         errorLog "\nStorage item type ${ACTIVE[TYPE]} should not have a" \
                  "mountpoint as listed in the storage definition file." || :
         printLog "Ignoring this mountpoint ($_mountpoint)!"
     fi
 done
-exit
 
-:<< EOF
+:<< 'EOF'
 # THIRD PASS: isn't luks, is a "child of" but NOT of luks, so probably special case of btrfs subvolumes (or LVM if I choose to implement it)
 for _record_index in {1..$NUM_STORAGE_RECORDS}; do
     setActiveStorageRecordWithPrefix $_record_index _record
@@ -643,5 +615,418 @@ for _mount_point in $MOUNT_POINTS; do
 
 done
 EOF
+}
+
+:<< \
+-------------------------------------------------------------------------------
+HELPER FUNCTIONS
+-------------------------------------------------------------------------------
+
+# only these storage types allowed
+valueIsInList () {
+    typeset -A _opts
+    zparseopts -D -E -A _opts -value: -list:
+    _value="${${_opts[--value]:-}#=}"
+    _list=(${(ps: :)${_opts[--list]:-}})
+    (( ${_list[(i)$_value]} <= ${#_list} ))
+    }
+
+typeIsValidStorageType () {
+    typeset _type="$1"
+    typeset -A VALID
+    VALID=(TYPES "drive partition logical encryption filesystem subvolume swap")
+    [[ ${(L)_type} =~ "dis" ]] && _extra="\nDid you mean to use \'drive\'?" || :
+    valueIsInList --value $_type --list "${VALID[TYPES]}" && return 0 || \
+        errorLog "\'$_type\' is not a valid storage type.${_extra:-}"
+    }
+
+typeIsValidChildOf () {
+    typeset _type="$1" _parent_type=$2
+    typeset -A VALID
+    VALID=(
+        TYPES,CHILDREN,DRIVE "partition logical encryption filesystem"
+        TYPES,CHILDREN,PARTITION "logical encryption filesystem swap"
+        TYPES,CHILDREN,ENCRYPTION "logical filesystem swap"
+        TYPES,CHILDREN,FILESYSTEM "subvolume"
+        TYPES,CHILDREN,SWAP ""
+        )
+        valueIsInList --value $_type \
+            --list "${VALID[TYPES,CHILDREN,${(U)_parent_type}]}" || {
+            errorLog "\'$_type\' is not a valid child type for $_parent_type."
+            exit 1
+            }
+    }
+
+itemHasRequiredOptions () {
+    typeset _item_type="${(U)1}"; shift
+    typeset _item_options_assigned="$@"
+    typeset -A REQUIRED
+    REQUIRED=(
+        DRIVE ""
+        PARTITION "size"
+        ENCRYPTION "label"
+        FILESYSTEM "fstype mountpoint"
+        SUBVOLUME "mountpoint"
+        SWAP ""
+        )
+    for _item_req in ${(ps: :)REQUIRED[$_item_type]}
+    do
+        valueIsInList --value $_item_req --list "$_item_options_assigned" || \
+            errorLog "\'$_type\' requires the --$_item_req option"\
+                     "in its storage file entry."
+    done
+    }
+
+convertStorageFileToArray () {
+    # _opts contains the arguments passed to this function
+
+    typeset -A _opts
+    zparseopts -D -E -A _opts -input: -output:
+    _inputfilepath="${${_opts[--input]:-}#=}"
+    _outputarrayname="${${_opts[--output]:-}#=}"
+
+    # initialization
+    #[[ -n "$_inputfilepath" && -n "$_outputarrayname" ]] \
+    #    || errorLog "$0 requires both a filepath and output arrayname."
+
+    unset PAYLOAD
+    typeset -ag STORAGE_CMDS $_outputarrayname
+    typeset -a STORAGE_FILE_RAW_DATA
+    typeset -a STORAGE_FILE_SCRUBBED_DATA
+    typeset -Ag CHILDREN
+
+    # read storage file into array
+    STORAGE_FILE_RAW_DATA=(${(f)"$(<$_inputfilepath)"})
+
+    # strip comments (full or partial)
+    # merge escaped newlines into single lines
+    for _line in "${(@)STORAGE_FILE_RAW_DATA}"; do
+
+        # if this line isn't blank or a comment, continue to process
+        if [[ -n "${_line::=${_line//\#*}}" \
+            && ! "$_line" =~ "^[[:space:]]*$" ]]; then
+
+            # if this line ends in an escaped newline, prep to merge with next
+            if [[ "${_line[-1]}" == \\ ]]; then
+                # set as previous line (and append if we have escaped
+                # newlines on multiple sequential lines)
+                _prev_line="${_prev_line:-}$_line[1,-2]"
+
+            # otherwise assign line to payload (merging with any prev line)
+            else
+
+                _line="${_prev_line:-}$_line"
+                # record line in sim file
+                simPrint "$_line"
+                _indent="${#${_line}%%[^[:space:]]*}"
+
+                # if this is the first line, initialize the payload and
+                # check that the first line is of type drive. if not,
+                # prepend a "drive" line (assume implied drive) and add a
+                # global indent value
+                (( ${+PAYLOAD} )) || {
+                    typeset -ag PAYLOAD
+                    [[ "${${(ps: :)_line}[(w)1]}" == "drive" ]] && {
+                        typeset -i _base_indent=$_indent
+                        PAYLOAD=()
+                    } || {
+                        typeset -i _extra_indent=1
+                        typeset -i _base_indent=0
+                        _payload="--type drive "
+                        _payload+="--item_indent 0"
+                        PAYLOAD=("$_payload")
+                        }
+                    }
+
+                _payload="--type ${_line:${_indent}:${#_line}} "
+                _payload+="--item_indent $(( $_indent + ${_extra_indent:-0} ))"
+                PAYLOAD+=("$_payload")
+                _prev_line=""
+            fi
+        fi
+    done
+
+    debugLog "\nPAYLOAD IS CURRENTLY:"
+    for _pline in "${(@)PAYLOAD}"; do debugLog "$_pline"; done
+    debugLog
+
+    # loop through payload and convert, normalizing to command argument
+    # format and performing basic compliance checks
+    initializeStorageTreeValues  --base_indent $_base_indent
+
+}
+
+initializeStorageTreeValues () {
+# uses global state PAYLOAD, yuck. should change this to be a passed
+# scalar value or at the very least a variable reference. Also, should
+# pass the output (STORAGE) array name as a reference, at least. TODO
+typeset _funcopt_values_as_called="$*"
+typeset -i _item_index=0
+typeset -a _funcopts
+_funcopts=(base_indent item_indent parent_index section_indent outputarrayname)
+
+while (( ${#PAYLOAD} )); do
+    eval set -- "$_funcopt_values_as_called ${_head::=${PAYLOAD[1]:-}}"
+    _options_assigned=""
+    
+    for _opt in $STOROPTS_BOOL; do
+        eval "zparseopts -E -$_opt=_$_opt"
+        eval '_optvalue="${_'$_opt'[1]:-}"'
+        [[ -z "$_optvalue" ]] || {
+            eval $_opt'[1]=true';
+            _options_assigned+=" $_opt";
+            }
+    done
+    for _opt in $_funcopts $STOROPTS_SCAL; do
+        eval "zparseopts -E -$_opt:=_$_opt"
+        eval _$_opt'[1]=()'
+        eval '[[ -z "${_'$_opt'[1]:-}" ]] || {
+            _'$_opt'[1]="${_'$_opt'[1]#=}"
+            _options_assigned+=" $_opt"
+            }'
+    done
+
+    # item is a peer of the current section
+    if (( $_item_indent == ${_section_indent:-$_base_indent} ))
+    then
+        _item_index+=1
+        _parent_index_d="${_parent_index:-}${_parent_index:+,}"
+        _full_index="${_parent_index_d}${_item_index}"
+
+        # check that the storage item is not a toaster
+        typeIsValidStorageType $_type || {
+            errorLog "Exiting due to invalid storage type."
+            exit 1
+            }
+
+        # make sure we have all required options
+        itemHasRequiredOptions "$_type" "$_options_assigned" || {
+            errorLog "Exiting due to missing required storage item option."
+            exit 1
+            }
+
+        _parent_type="${STORAGE[${_parent_index:-},TYPE]:-}"
+        if [[ -n ${_parent_type} ]]; then
+            # has a parent, check it, erroring out if not valid
+            typeIsValidChildOf $_type $_parent_type
+        elif [[ "$_type" != "drive" ]]; then
+            # no parent, make sure it is of type drive
+            # if not, assume implied drive and insert a
+            # plain drive entry above it? TODO
+            errorLog "Root devices must be type \"drive\""\
+                     "(not \"$_type\")."
+        fi
+
+        # STORAGE[${_parent_index_d}CHILDTYPES]+=" $_type"
+        STORAGE[${_parent_index_d}CHILDREN]+=" $_full_index"
+
+        # $DEBUG && STORAGE[${_full_index},ARGS]="$@ $_head"
+
+        [[ -z ${_parent_index} ]] || \
+            STORAGE[${_full_index},PARENT]+="$_parent_index"
+
+        for _opt in $STOROPTS_BOOL $STOROPTS_SCAL; do
+            #eval '_optvalue="${_'$_opt'}"'
+            eval '_optvalue="${_'$_opt':-}"'
+            [[ -z "${_optvalue}" ]] || \
+                STORAGE[${_full_index},${(U)_opt}]+="$_optvalue"
+        done
+
+        # trim payload for next go round
+        PAYLOAD[1]=()
+
+    # item is a child of the current section, so recurse
+    elif (( $_item_indent > ${_section_indent:-$_base_indent} ))
+    then
+        _full_index="${_parent_index:-}${_parent_index:+,}${_item_index}"
+        $0  --base_indent "$_base_indent" \
+            --section_indent "$_item_indent" \
+            --parent_index "$_full_index"
+
+    elif (( $_item_indent < ${_section_indent:-$_base_indent} ))
+    then
+
+        # payload head is superior to current level, so return from
+        # recursive call until we get back to a peer level
+        return 0
+
+    fi
+done
+}
+
+getUnmountedDrives () {
+    typeset -a drives
+    drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+    for drive in $drives; do
+        { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $drive)" ]] \
+          || mount | grep $drive; } && drives=("${(@)drives:#$drive}") || :
+    done
+    print "$drives"
+}
+selectDrive () {
+    varname=$1
+    typeset -a drives
+    typeset -g SSD
+    drives=($(/usr/bin/lsblk --paths --nodeps --noheadings --output NAME))
+    debugLog "Full list of drives: $drives"
+
+    # check if device or child has an existing mountpoint and remove from drives
+    # array if so
+    for drive in $drives; do
+        { [[ -n "$(/usr/bin/lsblk -no MOUNTPOINT $drive)" ]] \
+          || mount | grep $drive; } && drives=("${(@)drives:#$drive}") || :
+    done
+    debugLog "List of drives with no mountpoint: $drives"
+
+    userQuit () { printLog "\nUser selected quit."; exit; }
+
+    # User selects drive for install
+    typeset CONFIRM="" SELECTED=""
+    typeset -i i=0
+    while [[ ! $CONFIRM =~ [Yy] ]]; do
+
+        # list drives
+        printLog "Available unmounted drives for installation:\n"
+        for drive in $drives; do
+            alertLog "[$(( i += 1))] $drive ($(/usr/bin/lsblk -dno SIZE $drive))"
+        done
+
+        # Pick drive or quit
+        queryLog "\nPlease enter the number of the drive you wish to install to," \
+                 "or 'q' to quit: (1$((($i > 1)) && queryLog "-$i")/q) "
+        while [[ -z $SELECTED || ! $SELECTED =~ [1-$i] && ! ${(L)SELECTED} == q ]]
+        do
+            queryLog "\b \b"
+            read -k 1 SELECTED || : # read returns an error code at EOF; ignore it
+        done
+        [[ $SELECTED != "q" ]] || userQuit
+
+        # Identify as SSD or standard
+        queryLog "\n\nIs $drives[$SELECTED] an SSD? (y/N):"
+        read -k SSD || :; [[ ${(L)SSD} == y ]] && SSD="" || unset SSD; echo
+
+        # Summarize and confirm
+        alertLog "\nYou have selected $drives[$SELECTED] for"\
+                 "COMPLETE ERASURE, and identified it as ${SSD-NOT }an SSD."
+        queryLog "\nEnter'y' to erase, 'n' to make changes, or 'q' to quit: (y/N/q) "
+        read -k CONFIRM ||:; [[ ${(L)CONFIRM} != "q" ]] || userQuit
+    done
+
+    eval "typeset -g $varname"
+    eval $varname'=$drives[$SELECTED]'
+
+    }
+
+makeDevPaths () {
+
+    typeset _parent_index="${1:-}"
+    typeset _parent_index_d="${_parent_index:-}${_parent_index:+,}"
+    typeset _full_index
+
+    for _full_index in ${(ps: :)STORAGE[${_parent_index_d}CHILDREN]:-}; do
+
+        typeset _item_type=${STORAGE[${_full_index},TYPE]}
+        typeset _parent_devpath=${STORAGE[${_parent_index_d}DEVPATH]:-}
+        typeset _devpath=${STORAGE[${_full_index},DEVPATH]:-}
+        typeset _item_label=${STORAGE[${_full_index},LABEL]:-}
+
+        # if it hasn't already been set
+        if [[ -z "$_devpath" ]]; then
+
+            # partitions
+            if [[ "$_item_type" == "partition" ]]; then
+                _devpath=${_parent_devpath}${_full_index##*,}
+
+            # encryption
+            elif [[ "$_item_type" == "encryption" ]]; then
+                _devpath=/dev/mapper/
+                [[ -n ${STORAGE[${_full_index},LABEL]:-} ]] \
+                    && _devpath+=${STORAGE[${_full_index},LABEL]:-// /_} \
+                    || _devpath+=${STORAGE[${_parent_index},DEVPATH]//\//_}
+
+            # swap
+            elif [[ "$_item_type" == "swap" ]]; then
+                _devpath=$_parent_devpath
+
+            # filesystem
+            elif [[ "$_item_type" == "filesystem" ]]; then
+                _devpath=$_parent_devpath
+
+            # filesystem
+            elif [[ "$_item_type" == "subvolume" ]]; then
+                _devpath=$_parent_devpath
+
+            fi
+            STORAGE[${_full_index},DEVPATH]=${_devpath}
+
+        fi
+
+        # recursively handle children
+        makeDevPaths ${_full_index}
+
+    done
+    }
+
+getStorageItemIndexesOfType () {
+    typeset -A _results; _results=(${(kv)STORAGE[(I)*TYPE]})
+    print ${(@ok)_results[(R)$1]%,TYPE}
+    }
+
+getStorageItemIndexesOfTypeForParent () {
+    typeset -A _results; _results=(${(kv)STORAGE[(I)$2,?,TYPE]})
+    print ${(@ok)_results[(R)$1]%,TYPE}
+    }
+
+activateRecord () {
+    unset ACTIVE; typeset -Ag ACTIVE
+    for _key in "${(@k)STORAGE[(I)$1,[^[:digit:]]*]}"; do
+        ACTIVE[${_key#$1,}]="${STORAGE[$_key]}"
+    done
+}
+
+getUUIDForDevpath () {
+    lsblk -no UUID $1
+}
+
+itemIsInSSD () {
+    (( ${+STORAGE[${(ps:,:)1[1]},SSD]} ))
+}
+
+countdown () {
+    for i in {$1..1}; do print -n "$i \b" ;sleep 1; print -n "${i//?/\b}"; done
+}
+
+countdownMsg () {
+    justLog "$2:"
+    print -n "$2"
+    for i in {$1..1}; do _count=" in $i seconds"; print -n "$_count \b" ;sleep 1; print -n "${_count//?/\b}"; done
+    #print ":${_count//?/\b}:"
+    print "${_count//?/ }${_count//?/\b}:"
+}
+
+setPassphrase() {
+    returnvar=$1
+    typeset -g $returnvar
+    typeset passphrase="" confirmation=""
+    prompt="${2:-passphrase}"
+    while [[ -z "$passphrase" ]]; do
+        print -n " Enter $prompt   : "
+        read -rs passphrase
+        print
+        print -n " Confirm $prompt : "
+        read -rs confirmation
+        print
+        #print; read -rs "passphrase?Enter $prompt : "
+        #echo "\n\n"; read -rs "confirmation?Confirm $prompt    : "
+        #echo "\n\n"
+        if [[ "$passphrase" != "$confirmation" ]]; then
+        print "\nInput does not match!"
+        passphrase="" confirmation=""
+        fi
+    done
+    #print -rn "$passphrase"
+    typeset -g $returnvar="$passphrase"
+    unset passphrase confirmation
+}
 
 # vim: set filetype=sh :

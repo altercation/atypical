@@ -3,7 +3,7 @@
 Process command line options
 -------------------------------------------------------------------------------
 [[ -n "$(typeset SCRIPTOPT)" ]] || {
-typeset -A SCRIPTOPT
+typeset -Ag SCRIPTOPT DEBUG FORCE SIM TEST VERBOSE XTRACE
 optspec=":dfhsvxT-:"
 while getopts "$optspec" optchar; do
     if [[ "${optchar}" == "-" ]]; then
