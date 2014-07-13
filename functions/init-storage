@@ -109,7 +109,7 @@ MKFS[OPTIONS,ZFS]=''
 
 # mount default options (both common and specific to each fstype)
 typeset -Ag MOUNTOPTIONS
-MOUNTOPTIONS[COMMON]='rw'
+MOUNTOPTIONS[COMMON]='defaults,x-mount.mkdir'
 MOUNTOPTIONS[SSD]='noatime'
 MOUNTOPTIONS[BTRFS]='compress=lzo,space_cache,autodefrag,inode_cache,'
 MOUNTOPTIONS[BTRFS,SSD]='ssd,discard_space'
