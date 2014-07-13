@@ -484,6 +484,8 @@ do
     then
         :
         # make a subvolume, etc.
+        _mountpoint="${MOUNTROOT%/}/${ACTIVE[MOUNTPOINT]#/}"
+        evalSim "btrfs subvolume create ${(q-)_mountpoint%/}"
     elif [[ "${ACTIVE[TYPE]}" == "filesystem" ]]
     then
         :
@@ -500,7 +502,7 @@ do
         _mountpoint="${MOUNTROOT%/}/${ACTIVE[MOUNTPOINT]#/}"
         evalSim "$_mountcmd -o"\
                  "${_MOUNTOPTIONS_CSV//,,/,}"\
-                 "${ACTIVE[DEVPATH]} ${_mountpoint%/}"
+                 "${ACTIVE[DEVPATH]} ${(q-)_mountpoint%/}"
     else
         errorLog "\nStorage item type ${ACTIVE[TYPE]} should not have a" \
                  "mountpoint as listed in the storage definition file." || :
@@ -1028,5 +1030,45 @@ setPassphrase() {
     typeset -g $returnvar="$passphrase"
     unset passphrase confirmation
 }
+
+# Following is reserved for future refactoring
+# The storage item tree is really just a recursive set of patterns with defined
+# relationships and qualities which can be further abstracted out of the program
+# logic and into pattern / relationship definitions.
+:<< 'REFERENCE'
+typeset -Ag PATTERN
+PATTERN[VALID,OPTIONS,BOOLEAN]="bootable noclobber ssd"
+PATTERN[VALID,OPTIONS,SCALAR]="devpath fstype label code mkfsoptions mountoptions mountpoint size type"
+PATTERN[VALID,OPTIONS]+='${(e)PATTERN[(I)VALID,OPTIONS,*]}'
+
+typeset -Ag VALIDITY
+VALIDITY[PARENT,TYPE,,TYPE]="drive"
+VALIDITY[PARENT,TYPE,DRIVE,TYPE]="partition logical encryption filesystem"
+VALIDITY[PARENT,TYPE,PARTITION,TYPE]="logical encryption filesystem swap"
+VALIDITY[PARENT,PARENT,TYPE,ENCRYPTION,TYPE]="logical filesystem swap"
+VALIDITY[PARENT,TYPE,FILESYSTEM,TYPE]="subvolume"
+VALIDITY[PARENT,TYPE,SWAP,TYPE]=""
+VALIDITY[PARENT,FSTYPE,BTRFS,TYPE]="subvolume"
+VALIDITY[PARENT,TYPE,,TYPE]="subvolume"
+VALIDITY[PEER,TYPE,DRIVE,TYPE]="drive"
+VALIDITY[PEER,TYPE,PARTITION,TYPE]="partition"
+VALIDITY[PEER,TYPE,SWAP,TYPE]=""
+
+INFER[TYPE,SUBVOLUME,PARENT,FSTYPE]="btrfs"
+INFER[TYPE,PARTITION,PARENT,TYPE]="drive"
+
+OPTIONS[REQUIRED,TYPE,DRIVE]=""
+OPTIONS[REQUIRED,TYPE,PARTITION]="size"
+OPTIONS[REQUIRED,TYPE,ENCRYPTION]="label"
+OPTIONS[REQUIRED,TYPE,FILESYSTEM]="fstype mountpoint"
+OPTIONS[REQUIRED,TYPE,SUBVOLUME]="mountpoint"
+OPTIONS[REQUIRED,TYPE,SWAP]=""
+
+CLASS[RULETYPE,FILTER]
+    
+OPTIONS[VALID,TYPE,DRIVE]="bootable noclobber ssd devpath"
+OPTIONS[VALID,TYPE,PARTITION]="bootable noclobber ssd devpath label code size"
+OPTIONS[VALID,TYPE,FILESYSTEM]="bootable noclobber ssd devpath label fstype"
+REFERENCE
 
 # vim: set filetype=sh :

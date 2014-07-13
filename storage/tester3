@@ -13,4 +13,5 @@ drive --devpath=/dev/sda --ssd
         swap --label "MySwap"
     partition --size max --label "SYS PART"
             filesystem --fstype btrfs --mountpoint / --mountoptions "random,special,options"
+                subvolume --mountpoint /home
 
