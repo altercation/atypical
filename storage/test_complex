@@ -1,17 +1,9 @@
 # comment
 drive --devpath=/dev/sda --ssd
-    partition --size 100M --bootable --label BOOTPART
+    partition --size ram
+        swap
+    partition --size max
         encryption --label cryptpart
-            filesystem --fstype fat --mountpoint /boot
-    partition --size 100M --bootable --label BOOTPART
-        encryption --label cryptpart
-            filesystem --fstype fat --mountpoint /tmp/test
-    partition --size 100M --bootable --label BOOTPART
-        encryption --label cryptpart
-            filesystem --fstype fat --mountpoint /tmp
-    partition --size ram --label "SwapPart"
-        swap --label "MySwap"
-    partition --size max --label "SYS PART"
-            filesystem --fstype btrfs --mountpoint / --mountoptions "random,special,options"
+            filesystem --fstype btrfs --mountpoint /
                 subvolume --mountpoint /home
 
