@@ -1,3 +1,0 @@
-# a comment
-partition --label "test"
-    filesystem --fstype=btrfs
