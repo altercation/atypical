@@ -461,7 +461,7 @@ for _filesystem in $(getStorageItemIndexesOfType filesystem); do
         && _ssd="${MKFS[${(U)ACTIVE[FSTYPE]},SSD]:-}" || _ssd=""
     typeset -a _mkfs_options
     _mkfs_options=(
-        ${MKFS[${(U)ACTIVE[FSTYPE]}]:-}
+        ${MKFS[OPTIONS,${(U)ACTIVE[FSTYPE]}]:-}
         ${_ssd}
         ${ACTIVE[MKFSOPTIONS]:-}
         )
