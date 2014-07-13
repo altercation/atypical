@@ -2,7 +2,7 @@
 drive --devpath=/dev/sda --ssd
     partition --size ram
         swap
-    partition --size max
+    partition --size max --bootable
         encryption --label cryptpart
             filesystem --fstype btrfs --mountpoint /
                 subvolume --mountpoint /home
